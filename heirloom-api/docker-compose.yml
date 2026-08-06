@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: heirloom
+      POSTGRES_PASSWORD: heirloom
+      POSTGRES_DB: heirloom
+    ports:
+      - '5432:5432'
+    volumes:
+      - heirloom_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  heirloom_postgres_data:
