@@ -73,6 +73,11 @@ export const envSchema = z.object({
     .int()
     .positive()
     .default(30),
+  JOURNEY_DELETION_GRACE_PERIOD_DAYS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30),
   LOGIN_LOCKOUT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   LOGIN_LOCKOUT_MINUTES: z.coerce.number().int().positive().default(15),
 

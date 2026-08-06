@@ -1,9 +1,10 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
 import { media, milestones } from '../../database/schema';
+import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
 import {
   CreateMilestoneInput,
   Milestone,
@@ -17,27 +18,41 @@ export class MilestonesService {
     createdBy: string,
     input: CreateMilestoneInput,
   ): Promise<Milestone> {
+    // Journeys functional spec, Section 8: visibility enforced at the data
+    // layer — milestones are a journey's content, so creating/reading them
+    // must go through the same access check as the journey itself.
+    await requireJourneyAccess(this.db, createdBy, input.journeyId);
+
     const [created] = await this.db
       .insert(milestones)
-      .values({ ...input, date: new Date(input.date), createdBy })
+      .values({
+        ...input,
+        date: input.date ? new Date(input.date) : new Date(),
+        createdBy,
+      })
       .returning();
     return this.toDto(created, []);
   }
 
-  async listByJourney(journeyId: string): Promise<Milestone[]> {
+  /** Chronological by memory date (Section 6), not upload order. */
+  async listByJourney(userId: string, journeyId: string): Promise<Milestone[]> {
+    await requireJourneyAccess(this.db, userId, journeyId);
+
     const rows = await this.db.query.milestones.findMany({
       where: eq(milestones.journeyId, journeyId),
+      orderBy: asc(milestones.date),
     });
     return Promise.all(rows.map((row) => this.withMediaIds(row)));
   }
 
-  async findById(id: string): Promise<Milestone> {
+  async findById(userId: string, id: string): Promise<Milestone> {
     const milestone = await this.db.query.milestones.findFirst({
       where: eq(milestones.id, id),
     });
     if (!milestone) {
       throw new NotFoundException('Milestone not found');
     }
+    await requireJourneyAccess(this.db, userId, milestone.journeyId);
     return this.withMediaIds(milestone);
   }
 

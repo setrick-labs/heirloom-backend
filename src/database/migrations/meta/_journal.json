@@ -15,6 +15,13 @@
       "when": 1786026219495,
       "tag": "0001_sturdy_xorn",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786044386171,
+      "tag": "0002_spotty_captain_flint",
+      "breakpoints": true
     }
   ]
 }

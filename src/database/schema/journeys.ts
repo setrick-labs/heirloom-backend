@@ -18,9 +18,13 @@ export const journeys = pgTable('journeys', {
   visibilityType: journeyVisibilityEnum('visibility_type')
     .notNull()
     .default('all'),
+  // The sole owner (single-owner for v1, see the Journeys functional spec) —
+  // exclusively controls rename, visibility, membership, and deletion.
   createdBy: uuid('created_by')
     .notNull()
     .references(() => users.id, { onDelete: 'restrict' }),
+  // Soft-delete, same grace-period pattern as families.deletedAt.
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   ...timestamps,
 });
 

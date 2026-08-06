@@ -20,13 +20,22 @@ export const milestoneSchema = z.object({
 });
 export type Milestone = z.infer<typeof milestoneSchema>;
 
-export const createMilestoneInputSchema = milestoneSchema.pick({
-  journeyId: true,
-  title: true,
-  description: true,
-  date: true,
-  location: true,
-});
+/**
+ * `date` is the "memory date" (when it happened), distinct from the
+ * milestone's createdAt (when it was uploaded) — Journeys functional spec
+ * Section 6. Optional here: defaults to the upload timestamp server-side if
+ * omitted, since someone backfilling an old photo won't always know or
+ * bother setting an exact historical date.
+ */
+export const createMilestoneInputSchema = milestoneSchema
+  .pick({
+    journeyId: true,
+    title: true,
+    description: true,
+    date: true,
+    location: true,
+  })
+  .partial({ date: true });
 export type CreateMilestoneInput = z.infer<typeof createMilestoneInputSchema>;
 
 export const updateMilestoneInputSchema = milestoneSchema

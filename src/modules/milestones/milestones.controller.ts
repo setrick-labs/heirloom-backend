@@ -28,12 +28,15 @@ export class MilestonesController {
   }
 
   @Get()
-  list(@Query('journeyId', new ZodValidationPipe(idSchema)) journeyId: string) {
-    return this.milestonesService.listByJourney(journeyId);
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('journeyId', new ZodValidationPipe(idSchema)) journeyId: string,
+  ) {
+    return this.milestonesService.listByJourney(user.id, journeyId);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.milestonesService.findById(id);
+  findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.milestonesService.findById(user.id, id);
   }
 }
