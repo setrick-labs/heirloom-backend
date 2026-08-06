@@ -8,6 +8,13 @@
       "when": 1786023808148,
       "tag": "0000_silly_purple_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786026219495,
+      "tag": "0001_sturdy_xorn",
+      "breakpoints": true
     }
   ]
 }

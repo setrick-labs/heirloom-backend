@@ -1,23 +1,31 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, count, eq, gt, isNull } from 'drizzle-orm';
+import { and, count, eq, gt, inArray, isNull, ne, or } from 'drizzle-orm';
 
 import { env } from '../../config/env';
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
 import {
+  aliases,
   familyInvites,
   familyMembers,
   families,
   users,
 } from '../../database/schema';
 import { generateNumericCode } from '../../shared/utils/auth-tokens.util';
-import { getFamilyMembership } from '../../shared/utils/family-membership.util';
+import {
+  getFamilyMembership,
+  isActiveFamilyMember,
+  isFamilyMember,
+  resolveActiveFamilyId,
+} from '../../shared/utils/family-membership.util';
+import type { FamilyMemberView } from './validations/family-member.schema';
 import {
   FamilyInvite,
   FamilyInvitePreview,
@@ -62,19 +70,323 @@ export class FamiliesService {
       .select({ family: families })
       .from(familyMembers)
       .innerJoin(families, eq(familyMembers.familyId, families.id))
-      .where(eq(familyMembers.userId, userId));
+      .where(and(eq(familyMembers.userId, userId), isNull(families.deletedAt)));
 
     return Promise.all(rows.map((row) => this.withMemberCount(row.family)));
   }
 
   async findById(id: string): Promise<Family> {
     const family = await this.db.query.families.findFirst({
-      where: eq(families.id, id),
+      where: and(eq(families.id, id), isNull(families.deletedAt)),
     });
     if (!family) {
       throw new NotFoundException('Family not found');
     }
     return this.withMemberCount(family);
+  }
+
+  /** Section 3: roster, each name already resolved for this viewer (their alias, or the person's display name). */
+  async getMembers(
+    viewerId: string,
+    familyId: string,
+  ): Promise<FamilyMemberView[]> {
+    await this.requireMember(viewerId, familyId);
+
+    const rows = await this.db
+      .select({
+        userId: familyMembers.userId,
+        role: familyMembers.role,
+        joinedAt: familyMembers.joinedAt,
+        displayName: users.name,
+      })
+      .from(familyMembers)
+      .innerJoin(users, eq(familyMembers.userId, users.id))
+      .where(eq(familyMembers.familyId, familyId));
+
+    const aliasRows = await this.db.query.aliases.findMany({
+      where: and(
+        eq(aliases.familyId, familyId),
+        eq(aliases.viewerUserId, viewerId),
+      ),
+    });
+    const aliasByTarget = new Map(
+      aliasRows.map((row) => [row.subjectUserId, row.nickname]),
+    );
+
+    return rows.map((row) => {
+      const alias = aliasByTarget.get(row.userId);
+      return {
+        userId: row.userId,
+        role: row.role,
+        joinedAt: row.joinedAt.toISOString(),
+        displayName: row.displayName,
+        resolvedName: alias ?? row.displayName,
+        hasAlias: Boolean(alias),
+      };
+    });
+  }
+
+  /** Section 2: private, per-viewer — upserts so re-setting an alias just updates it. */
+  async setAlias(
+    viewerId: string,
+    familyId: string,
+    targetUserId: string,
+    nickname: string,
+  ): Promise<void> {
+    if (targetUserId === viewerId) {
+      throw new ForbiddenException(
+        'You cannot set an alias for yourself — edit your name instead.',
+      );
+    }
+    await this.requireMember(viewerId, familyId);
+    if (!(await isFamilyMember(this.db, targetUserId, familyId))) {
+      throw new NotFoundException('That person is not a member of this family');
+    }
+
+    await this.db
+      .insert(aliases)
+      .values({
+        familyId,
+        subjectUserId: targetUserId,
+        viewerUserId: viewerId,
+        nickname,
+      })
+      .onConflictDoUpdate({
+        target: [aliases.familyId, aliases.subjectUserId, aliases.viewerUserId],
+        set: { nickname, updatedAt: new Date() },
+      });
+  }
+
+  /** Reverts that person's display, for this viewer, back to their display name. Idempotent. */
+  async clearAlias(
+    viewerId: string,
+    familyId: string,
+    targetUserId: string,
+  ): Promise<void> {
+    await this.db
+      .delete(aliases)
+      .where(
+        and(
+          eq(aliases.familyId, familyId),
+          eq(aliases.subjectUserId, targetUserId),
+          eq(aliases.viewerUserId, viewerId),
+        ),
+      );
+  }
+
+  /** Section 4: admin-only, revokes access immediately. Content stays, attributed to them. */
+  async removeMember(
+    adminId: string,
+    familyId: string,
+    targetUserId: string,
+  ): Promise<void> {
+    if (targetUserId === adminId) {
+      throw new ForbiddenException('Use "leave family" to remove yourself');
+    }
+    await this.requireAdmin(adminId, familyId);
+    if (!(await getFamilyMembership(this.db, targetUserId, familyId))) {
+      throw new NotFoundException('That person is not a member of this family');
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(familyMembers)
+        .where(
+          and(
+            eq(familyMembers.familyId, familyId),
+            eq(familyMembers.userId, targetUserId),
+          ),
+        );
+      // Discard alias context tied to this membership, in both directions
+      // (aliases they set for others, and aliases others set for them).
+      await tx
+        .delete(aliases)
+        .where(
+          and(
+            eq(aliases.familyId, familyId),
+            or(
+              eq(aliases.subjectUserId, targetUserId),
+              eq(aliases.viewerUserId, targetUserId),
+            ),
+          ),
+        );
+    });
+
+    await this.healActiveFamilyId(targetUserId, familyId);
+  }
+
+  /** Section 5: additive — multiple admins can coexist, no distinction from the original creator. */
+  async promoteMember(
+    adminId: string,
+    familyId: string,
+    targetUserId: string,
+  ): Promise<void> {
+    await this.requireAdmin(adminId, familyId);
+    const membership = await getFamilyMembership(
+      this.db,
+      targetUserId,
+      familyId,
+    );
+    if (!membership) {
+      throw new NotFoundException('That person is not a member of this family');
+    }
+    if (ADMIN_ROLES.has(membership.role)) {
+      return;
+    }
+
+    await this.db
+      .update(familyMembers)
+      .set({ role: 'admin' })
+      .where(
+        and(
+          eq(familyMembers.familyId, familyId),
+          eq(familyMembers.userId, targetUserId),
+        ),
+      );
+  }
+
+  /**
+   * Section 6: self-service departure. A lone remaining member leaving is
+   * treated as deleting the family (nowhere for it to go); a lone admin
+   * leaving a multi-member family is blocked until they promote someone else.
+   */
+  async leaveFamily(
+    userId: string,
+    familyId: string,
+  ): Promise<{ familyDeleted: boolean }> {
+    const membership = await getFamilyMembership(this.db, userId, familyId);
+    if (!membership) {
+      throw new NotFoundException('You are not a member of this family');
+    }
+
+    const [{ value: memberCount }] = await this.db
+      .select({ value: count() })
+      .from(familyMembers)
+      .where(eq(familyMembers.familyId, familyId));
+
+    if (memberCount === 1) {
+      await this.softDelete(familyId);
+      return { familyDeleted: true };
+    }
+
+    if (ADMIN_ROLES.has(membership.role)) {
+      const [{ value: otherAdminCount }] = await this.db
+        .select({ value: count() })
+        .from(familyMembers)
+        .where(
+          and(
+            eq(familyMembers.familyId, familyId),
+            ne(familyMembers.userId, userId),
+            inArray(familyMembers.role, ['owner', 'admin']),
+          ),
+        );
+      if (otherAdminCount === 0) {
+        throw new ConflictException(
+          'Promote another member to admin before leaving — a family always needs at least one admin.',
+        );
+      }
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(familyMembers)
+        .where(
+          and(
+            eq(familyMembers.familyId, familyId),
+            eq(familyMembers.userId, userId),
+          ),
+        );
+      await tx
+        .delete(aliases)
+        .where(
+          and(
+            eq(aliases.familyId, familyId),
+            or(
+              eq(aliases.subjectUserId, userId),
+              eq(aliases.viewerUserId, userId),
+            ),
+          ),
+        );
+    });
+
+    await this.healActiveFamilyId(userId, familyId);
+    return { familyDeleted: false };
+  }
+
+  /** Section 8: admin-only, deliberately just a name — no other family settings requested. */
+  async renameFamily(
+    adminId: string,
+    familyId: string,
+    name: string,
+  ): Promise<Family> {
+    await this.requireAdmin(adminId, familyId);
+    const [updated] = await this.db
+      .update(families)
+      .set({ name, updatedAt: new Date() })
+      .where(eq(families.id, familyId))
+      .returning();
+    if (!updated) {
+      throw new NotFoundException('Family not found');
+    }
+    return this.withMemberCount(updated);
+  }
+
+  /**
+   * Section 7: soft-delete with a grace period. `confirmName` is validated
+   * server-side too — the "type the name to confirm" pattern is a UX gate,
+   * not a security boundary, so it shouldn't be trustable from the client alone.
+   */
+  async initiateDelete(
+    adminId: string,
+    familyId: string,
+    confirmName: string,
+  ): Promise<Family> {
+    await this.requireAdmin(adminId, familyId);
+    const family = await this.db.query.families.findFirst({
+      where: and(eq(families.id, familyId), isNull(families.deletedAt)),
+    });
+    if (!family) {
+      throw new NotFoundException('Family not found');
+    }
+    if (confirmName !== family.name) {
+      throw new BadRequestException(
+        'Type the family name exactly to confirm deletion.',
+      );
+    }
+
+    return this.softDelete(familyId);
+  }
+
+  /** Available only during the grace period — admin-only, bypasses the deleted-family filter deliberately. */
+  async cancelDelete(adminId: string, familyId: string): Promise<Family> {
+    const family = await this.db.query.families.findFirst({
+      where: eq(families.id, familyId),
+    });
+    if (!family?.deletedAt) {
+      throw new NotFoundException('This family is not pending deletion.');
+    }
+
+    const membership = await getFamilyMembership(this.db, adminId, familyId);
+    if (!membership || !ADMIN_ROLES.has(membership.role)) {
+      throw new ForbiddenException('Only a family admin can do that');
+    }
+
+    const graceDeadline = new Date(
+      family.deletedAt.getTime() +
+        env.FAMILY_DELETION_GRACE_PERIOD_DAYS * 86_400_000,
+    );
+    if (graceDeadline <= new Date()) {
+      throw new ConflictException(
+        'The recovery window for this family has passed.',
+      );
+    }
+
+    const [updated] = await this.db
+      .update(families)
+      .set({ deletedAt: null })
+      .where(eq(families.id, familyId))
+      .returning();
+    return this.withMemberCount(updated);
   }
 
   /**
@@ -180,9 +492,51 @@ export class FamiliesService {
     return this.findById(invite.familyId);
   }
 
+  private async softDelete(familyId: string): Promise<Family> {
+    const [updated] = await this.db
+      .update(families)
+      .set({ deletedAt: new Date() })
+      .where(eq(families.id, familyId))
+      .returning();
+    return this.withMemberCount(updated);
+  }
+
+  /** Fixes a stale activeFamilyId the moment membership to it is lost, rather than waiting for next sign-in. */
+  private async healActiveFamilyId(
+    userId: string,
+    familyIdBeingLost: string,
+  ): Promise<void> {
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+    if (user?.activeFamilyId !== familyIdBeingLost) {
+      return;
+    }
+    const nextActiveFamilyId = await resolveActiveFamilyId(
+      this.db,
+      userId,
+      null,
+    );
+    await this.db
+      .update(users)
+      .set({ activeFamilyId: nextActiveFamilyId })
+      .where(eq(users.id, userId));
+  }
+
+  /** Uses isActiveFamilyMember, not plain isFamilyMember — a soft-deleted family is inaccessible even to its members. */
+  private async requireMember(userId: string, familyId: string): Promise<void> {
+    if (!(await isActiveFamilyMember(this.db, userId, familyId))) {
+      throw new ForbiddenException('You are not a member of this family');
+    }
+  }
+
   private async requireAdmin(userId: string, familyId: string): Promise<void> {
     const membership = await getFamilyMembership(this.db, userId, familyId);
-    if (!membership || !ADMIN_ROLES.has(membership.role)) {
+    if (
+      !membership ||
+      !ADMIN_ROLES.has(membership.role) ||
+      !(await isActiveFamilyMember(this.db, userId, familyId))
+    ) {
       throw new ForbiddenException('Only a family admin can do that');
     }
   }
@@ -232,6 +586,7 @@ export class FamiliesService {
     row: typeof families.$inferSelect,
     memberCount: number,
   ): Family {
+    const deletedAt = row.deletedAt;
     return {
       id: row.id,
       name: row.name,
@@ -241,6 +596,13 @@ export class FamiliesService {
       memberCount,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      deletedAt: deletedAt ? deletedAt.toISOString() : null,
+      purgeAt: deletedAt
+        ? new Date(
+            deletedAt.getTime() +
+              env.FAMILY_DELETION_GRACE_PERIOD_DAYS * 86_400_000,
+          ).toISOString()
+        : null,
     };
   }
 }

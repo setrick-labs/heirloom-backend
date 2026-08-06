@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp } from 'drizzle-orm/pg-core';
 
 import { timestamps } from './_helpers';
 import { users } from './users';
@@ -11,6 +11,11 @@ export const families = pgTable('families', {
   ownerId: uuid('owner_id')
     .notNull()
     .references(() => users.id, { onDelete: 'restrict' }),
+  // Soft-delete: set = pending deletion (grace period), inaccessible to
+  // everyone including the initiating admin except via the direct
+  // cancel-deletion action. No purge job exists yet — rows past their grace
+  // period just stay soft-deleted until one is built.
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   ...timestamps,
 });
 

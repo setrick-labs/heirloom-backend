@@ -6,7 +6,6 @@ import {
 } from '../../../shared/validations/common.schema';
 import { userRoleSchema } from '../../users/validations/user.schema';
 
-/** Mirrors frontend/heirloom-mobile/src/schemas/family.schema.ts field-for-field. */
 export const familyMemberSchema = z.object({
   userId: idSchema,
   familyId: idSchema,
@@ -24,6 +23,9 @@ export const familySchema = z.object({
   memberCount: z.number().int().min(0).default(0),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
+  // Set only while pending deletion (grace period) — Section 7.
+  deletedAt: isoDateTimeSchema.nullable().optional(),
+  purgeAt: isoDateTimeSchema.nullable().optional(),
 });
 export type Family = z.infer<typeof familySchema>;
 
@@ -33,15 +35,13 @@ export const createFamilyInputSchema = familySchema.pick({
 });
 export type CreateFamilyInput = z.infer<typeof createFamilyInputSchema>;
 
-export const updateFamilyInputSchema = familySchema
-  .pick({ name: true, description: true, coverImageUrl: true })
-  .partial();
-export type UpdateFamilyInput = z.infer<typeof updateFamilyInputSchema>;
-
-export const inviteFamilyMemberInputSchema = z.object({
-  email: z.email(),
-  role: userRoleSchema.exclude(['owner']).default('member'),
+export const renameFamilyInputSchema = z.object({
+  name: z.string().min(1).max(120),
 });
-export type InviteFamilyMemberInput = z.infer<
-  typeof inviteFamilyMemberInputSchema
->;
+export type RenameFamilyInput = z.infer<typeof renameFamilyInputSchema>;
+
+/** Spec: "typing the family's name to confirm" — checked server-side too, not just a client UX gate. */
+export const deleteFamilyInputSchema = z.object({
+  confirmName: z.string().min(1),
+});
+export type DeleteFamilyInput = z.infer<typeof deleteFamilyInputSchema>;

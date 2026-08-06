@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 
 import {
   type AuthenticatedUser,
@@ -12,8 +20,16 @@ import {
   joinFamilyInputSchema,
 } from './validations/family-invite.schema';
 import {
+  type SetAliasInput,
+  setAliasInputSchema,
+} from './validations/family-member.schema';
+import {
   type CreateFamilyInput,
   createFamilyInputSchema,
+  type DeleteFamilyInput,
+  deleteFamilyInputSchema,
+  type RenameFamilyInput,
+  renameFamilyInputSchema,
 } from './validations/family.schema';
 
 @Controller('families')
@@ -38,6 +54,118 @@ export class FamiliesController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.familiesService.findById(id);
+  }
+
+  /** Section 8: admin-only. */
+  @Patch(':id')
+  async rename(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(renameFamilyInputSchema))
+    body: RenameFamilyInput,
+  ) {
+    const family = await this.familiesService.renameFamily(
+      user.id,
+      id,
+      body.name,
+    );
+    return apiResponse(family, 'Family renamed');
+  }
+
+  /** Section 7: admin-only, soft-delete with a grace period. `confirmName` must match exactly. */
+  @Delete(':id')
+  async remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(deleteFamilyInputSchema))
+    body: DeleteFamilyInput,
+  ) {
+    const family = await this.familiesService.initiateDelete(
+      user.id,
+      id,
+      body.confirmName,
+    );
+    return apiResponse(
+      family,
+      'Family deleted. You can undo this while it’s pending.',
+    );
+  }
+
+  /** Admin-only, only works during the grace period. */
+  @Post(':id/cancel-deletion')
+  async cancelDeletion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    const family = await this.familiesService.cancelDelete(user.id, id);
+    return apiResponse(family, 'Deletion canceled');
+  }
+
+  /** Section 3: any member. */
+  @Get(':id/members')
+  getMembers(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.familiesService.getMembers(user.id, id);
+  }
+
+  /** Section 2: private, per-viewer. */
+  @Patch(':id/members/:userId/alias')
+  async setAlias(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('userId') targetUserId: string,
+    @Body(new ZodValidationPipe(setAliasInputSchema)) body: SetAliasInput,
+  ) {
+    await this.familiesService.setAlias(
+      user.id,
+      id,
+      targetUserId,
+      body.nickname,
+    );
+    return apiResponse('Alias saved');
+  }
+
+  @Delete(':id/members/:userId/alias')
+  async clearAlias(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('userId') targetUserId: string,
+  ) {
+    await this.familiesService.clearAlias(user.id, id, targetUserId);
+    return apiResponse('Alias removed');
+  }
+
+  /** Section 5: admin-only. */
+  @Post(':id/members/:userId/promote')
+  async promote(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('userId') targetUserId: string,
+  ) {
+    await this.familiesService.promoteMember(user.id, id, targetUserId);
+    return apiResponse('Member promoted to admin');
+  }
+
+  /** Section 4: admin-only, cannot target yourself (use /leave instead). */
+  @Delete(':id/members/:userId')
+  async removeMember(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('userId') targetUserId: string,
+  ) {
+    await this.familiesService.removeMember(user.id, id, targetUserId);
+    return apiResponse('Member removed');
+  }
+
+  /** Section 6: self-service. May cascade into family deletion if this was the last member. */
+  @Post(':id/leave')
+  async leave(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    const result = await this.familiesService.leaveFamily(user.id, id);
+    return apiResponse(
+      result,
+      result.familyDeleted
+        ? 'You left, and the family was deleted with you.'
+        : 'You left the family',
+    );
   }
 
   /** Admin/owner only — generating a fresh code revokes the family's previous one. */

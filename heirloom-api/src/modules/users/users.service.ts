@@ -11,7 +11,8 @@ import type { Database } from '../../database/connection';
 import { users } from '../../database/schema';
 import {
   getFamilyMembership,
-  isFamilyMember,
+  isActiveFamilyMember,
+  resolveActiveFamilyId,
 } from '../../shared/utils/family-membership.util';
 import {
   SwitchActiveFamilyInput,
@@ -30,6 +31,25 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
+
+    // Self-heals a stale activeFamilyId (e.g. removed from what had been
+    // their active family) on every /users/me call — the guaranteed
+    // "next app interaction" the family functional spec asks for, beyond
+    // whatever proactive fix the action that caused it already attempted.
+    const resolvedActiveFamilyId = await resolveActiveFamilyId(
+      this.db,
+      id,
+      user.activeFamilyId,
+    );
+    if (resolvedActiveFamilyId !== user.activeFamilyId) {
+      const [healed] = await this.db
+        .update(users)
+        .set({ activeFamilyId: resolvedActiveFamilyId })
+        .where(eq(users.id, id))
+        .returning();
+      return this.toDto(healed);
+    }
+
     return this.toDto(user);
   }
 
@@ -51,7 +71,11 @@ export class UsersService {
     userId: string,
     input: SwitchActiveFamilyInput,
   ): Promise<User> {
-    const isMember = await isFamilyMember(this.db, userId, input.familyId);
+    const isMember = await isActiveFamilyMember(
+      this.db,
+      userId,
+      input.familyId,
+    );
     if (!isMember) {
       throw new ForbiddenException('You are not a member of that family');
     }
