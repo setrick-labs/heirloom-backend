@@ -83,6 +83,9 @@ export const envSchema = z.object({
     .int()
     .positive()
     .default(30),
+  // Private Vault spec Section 1: "a short grace window" — how long a
+  // vault-unlock session stays valid before the app has to re-prompt.
+  VAULT_SESSION_TTL_MINUTES: z.coerce.number().int().positive().default(10),
   LOGIN_LOCKOUT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   LOGIN_LOCKOUT_MINUTES: z.coerce.number().int().positive().default(15),
 

@@ -1,24 +1,31 @@
-import { pgTable, uuid, varchar, text } from 'drizzle-orm/pg-core';
+import { bigint, pgTable, uuid, text, varchar } from 'drizzle-orm/pg-core';
 
 import { timestamps } from './_helpers';
-import { families } from './families';
-import { media } from './media';
+import { mediaTypeEnum } from './enums';
 import { users } from './users';
 
-/** Private, biometric-gated items — only ownerId can ever list/unlock these. */
+/**
+ * Private Vault spec Section 4: person-scoped, not family-scoped — one
+ * Vault per person, full stop. No familyId here, deliberately, even though
+ * every other content table in this schema has one.
+ *
+ * Section 5: also deliberately its own table with its own storage-key
+ * column, rather than a row in `media` (which is built for family-shared
+ * content, keyed by familyId/journeyId/milestoneId). Vault items never pass
+ * through the same code path as shared content — full storage-level
+ * encryption is flagged as a follow-up, but this keeps the two completely
+ * separate at the data-model level today, not just gated by an app-level
+ * permission check on shared rows.
+ */
 export const vaultItems = pgTable('vault_items', {
   id: uuid('id').defaultRandom().primaryKey(),
-  familyId: uuid('family_id')
-    .notNull()
-    .references(() => families.id, { onDelete: 'cascade' }),
   ownerId: uuid('owner_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  mediaId: uuid('media_id').references(() => media.id, {
-    onDelete: 'set null',
-  }),
-  title: varchar('title', { length: 120 }).notNull(),
-  note: text('note'),
+  type: mediaTypeEnum('type').notNull(),
+  storageKey: text('storage_key').notNull(),
+  caption: varchar('caption', { length: 500 }),
+  sizeBytes: bigint('size_bytes', { mode: 'number' }),
   ...timestamps,
 });
 

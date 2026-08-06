@@ -56,7 +56,11 @@ export function assertValidMediaUpload(
     });
   }
 
-  const kind = isImageMimeType(contentType) ? 'images' : isAudioMimeType(contentType) ? 'audio' : 'videos';
+  const kind = isImageMimeType(contentType)
+    ? 'images'
+    : isAudioMimeType(contentType)
+      ? 'audio'
+      : 'videos';
   const maxSizeBytes = isImageMimeType(contentType)
     ? MAX_IMAGE_SIZE_BYTES
     : isAudioMimeType(contentType)

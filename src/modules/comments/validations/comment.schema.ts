@@ -54,7 +54,9 @@ export const createCommentInputSchema = commentSchema
   })
   .refine(
     (value) =>
-      value.type === 'text' || value.type === 'sticker' ? Boolean(value.body?.length) : true,
+      value.type === 'text' || value.type === 'sticker'
+        ? Boolean(value.body?.length)
+        : true,
     {
       // 'sticker' is a predefined SET (Section 4 — final asset list still
       // open), so its content is an identifier string in `body`, not an
@@ -64,7 +66,10 @@ export const createCommentInputSchema = commentSchema
     },
   )
   .refine(
-    (value) => (value.type === 'voice' || value.type === 'version' ? Boolean(value.mediaId) : true),
+    (value) =>
+      value.type === 'voice' || value.type === 'version'
+        ? Boolean(value.mediaId)
+        : true,
     {
       // 'version' ("add your version") is itself a photo/video, not text —
       // its content lives in mediaId, same as a voice recording.

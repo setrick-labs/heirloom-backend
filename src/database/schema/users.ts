@@ -49,6 +49,18 @@ export const users = pgTable(
       withTimezone: true,
     }),
 
+    // Private Vault spec Section 1: a second, independent lock — null means
+    // the Vault has never been set up yet. Deliberately distinct from
+    // passwordHash above (enforced at the API layer, not the DB) and never
+    // used by the main sign-in flow.
+    vaultPasswordHash: text('vault_password_hash'),
+    // Same "reject any vault token issued before this" pattern as
+    // sessionsInvalidatedAt above, bumped on vault password change/recovery
+    // (Section 6) so an old vault session can't outlive a credential reset.
+    vaultSessionsInvalidatedAt: timestamp('vault_sessions_invalidated_at', {
+      withTimezone: true,
+    }),
+
     ...timestamps,
   },
   (table) => [

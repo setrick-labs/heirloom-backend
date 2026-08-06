@@ -29,6 +29,13 @@
       "when": 1786046744464,
       "tag": "0003_overconfident_raza",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786054525794,
+      "tag": "0004_vault_items_person_scoped",
+      "breakpoints": true
     }
   ]
 }

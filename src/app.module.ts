@@ -16,6 +16,7 @@ import { MediaModule } from './modules/media/media.module';
 import { MilestonesModule } from './modules/milestones/milestones.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { UsersModule } from './modules/users/users.module';
+import { VaultModule } from './modules/vault/vault.module';
 import { GlobalExceptionFilter } from './shared/filters/global-exception.filter';
 import { JwtAuthGuard } from './shared/guards/jwt-auth.guard';
 import { ResponseInterceptor } from './shared/interceptors/response.interceptor';
@@ -49,6 +50,7 @@ import { SharedModule } from './shared/shared.module';
     MediaModule,
     CommentsModule,
     ReactionsModule,
+    VaultModule,
     GiftsModule,
     HealthModule,
   ],
