@@ -1,4 +1,13 @@
-import { Controller, Get, Param, Post, Query, Body } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 
 import {
   type AuthenticatedUser,
@@ -11,6 +20,8 @@ import { MilestonesService } from './milestones.service';
 import {
   type CreateMilestoneInput,
   createMilestoneInputSchema,
+  type RenameMilestoneInput,
+  renameMilestoneInputSchema,
 } from './validations/milestone.schema';
 
 @Controller('milestones')
@@ -38,5 +49,39 @@ export class MilestonesController {
   @Get(':id')
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.milestonesService.findById(user.id, id);
+  }
+
+  /** Section 8: creator or journey owner. */
+  @Patch(':id')
+  async rename(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(renameMilestoneInputSchema))
+    body: RenameMilestoneInput,
+  ) {
+    const milestone = await this.milestonesService.rename(user.id, id, body);
+    return apiResponse(milestone, 'Milestone renamed');
+  }
+
+  /** Section 8: creator or journey owner, soft-delete with a grace period. */
+  @Delete(':id')
+  async remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    const milestone = await this.milestonesService.initiateDelete(user.id, id);
+    return apiResponse(
+      milestone,
+      'Milestone deleted. You can undo this while it’s pending.',
+    );
+  }
+
+  @Post(':id/cancel-deletion')
+  async cancelDeletion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    const milestone = await this.milestonesService.cancelDelete(user.id, id);
+    return apiResponse(milestone, 'Deletion canceled');
   }
 }

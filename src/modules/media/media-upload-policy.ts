@@ -6,6 +6,9 @@ const MEGABYTE = 1024 * 1024;
 // reject an oversized upload up front than eat storage on one file.
 export const MAX_IMAGE_SIZE_BYTES = 20 * MEGABYTE;
 export const MAX_VIDEO_SIZE_BYTES = 300 * MEGABYTE;
+// Milestones spec Section 4: voice-note comments — a spoken message, not a
+// music file, so a much tighter cap than video makes sense.
+export const MAX_AUDIO_SIZE_BYTES = 20 * MEGABYTE;
 
 /** contentType -> file extension. Also doubles as the upload MIME allow-list. */
 export const ALLOWED_MEDIA_MIME_TYPES: Readonly<Record<string, string>> = {
@@ -16,10 +19,20 @@ export const ALLOWED_MEDIA_MIME_TYPES: Readonly<Record<string, string>> = {
   'video/mp4': 'mp4',
   'video/quicktime': 'mov',
   'video/webm': 'webm',
+  // expo-audio's default recording presets produce these.
+  'audio/m4a': 'm4a',
+  'audio/x-m4a': 'm4a',
+  'audio/mp4': 'm4a',
+  'audio/wav': 'wav',
+  'audio/webm': 'webm',
 };
 
 function isImageMimeType(contentType: string): boolean {
   return contentType.startsWith('image/');
+}
+
+function isAudioMimeType(contentType: string): boolean {
+  return contentType.startsWith('audio/');
 }
 
 /**
@@ -43,13 +56,16 @@ export function assertValidMediaUpload(
     });
   }
 
+  const kind = isImageMimeType(contentType) ? 'images' : isAudioMimeType(contentType) ? 'audio' : 'videos';
   const maxSizeBytes = isImageMimeType(contentType)
     ? MAX_IMAGE_SIZE_BYTES
-    : MAX_VIDEO_SIZE_BYTES;
+    : isAudioMimeType(contentType)
+      ? MAX_AUDIO_SIZE_BYTES
+      : MAX_VIDEO_SIZE_BYTES;
   if (sizeBytes > maxSizeBytes) {
     throw new BadRequestException({
       code: 'MEDIA_TOO_LARGE',
-      message: `File is too large (${Math.ceil(sizeBytes / MEGABYTE)}MB). Max is ${Math.floor(maxSizeBytes / MEGABYTE)}MB for ${isImageMimeType(contentType) ? 'images' : 'videos'}.`,
+      message: `File is too large (${Math.ceil(sizeBytes / MEGABYTE)}MB). Max is ${Math.floor(maxSizeBytes / MEGABYTE)}MB for ${kind}.`,
     });
   }
 

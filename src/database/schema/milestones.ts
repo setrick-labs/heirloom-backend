@@ -16,6 +16,8 @@ export const milestones = pgTable('milestones', {
   createdBy: uuid('created_by')
     .notNull()
     .references(() => users.id, { onDelete: 'restrict' }),
+  // Soft-delete, same grace-period pattern as journeys.deletedAt.
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   ...timestamps,
 });
 

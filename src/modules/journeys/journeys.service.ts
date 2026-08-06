@@ -358,12 +358,16 @@ export class JourneysService {
     const [{ value: milestoneCount }] = await this.db
       .select({ value: count() })
       .from(milestones)
-      .where(eq(milestones.journeyId, row.id));
+      .where(
+        and(eq(milestones.journeyId, row.id), isNull(milestones.deletedAt)),
+      );
 
     const [latestMilestone] = await this.db
       .select({ createdAt: milestones.createdAt })
       .from(milestones)
-      .where(eq(milestones.journeyId, row.id))
+      .where(
+        and(eq(milestones.journeyId, row.id), isNull(milestones.deletedAt)),
+      )
       .orderBy(desc(milestones.createdAt))
       .limit(1);
 

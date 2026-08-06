@@ -7,12 +7,14 @@ import { LoggerModule } from 'nestjs-pino';
 import { env, validateEnv } from './config/env';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CommentsModule } from './modules/comments/comments.module';
 import { FamiliesModule } from './modules/families/families.module';
 import { GiftsModule } from './modules/gifts/gifts.module';
 import { HealthModule } from './modules/health/health.module';
 import { JourneysModule } from './modules/journeys/journeys.module';
 import { MediaModule } from './modules/media/media.module';
 import { MilestonesModule } from './modules/milestones/milestones.module';
+import { ReactionsModule } from './modules/reactions/reactions.module';
 import { UsersModule } from './modules/users/users.module';
 import { GlobalExceptionFilter } from './shared/filters/global-exception.filter';
 import { JwtAuthGuard } from './shared/guards/jwt-auth.guard';
@@ -45,6 +47,8 @@ import { SharedModule } from './shared/shared.module';
     JourneysModule,
     MilestonesModule,
     MediaModule,
+    CommentsModule,
+    ReactionsModule,
     GiftsModule,
     HealthModule,
   ],
