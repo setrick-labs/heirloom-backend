@@ -29,4 +29,32 @@ export class NotificationService {
     );
     return Promise.resolve();
   }
+
+  /** Gifting spec Section 5: reads as "someone has something for you," not a generic signup prompt. */
+  sendGiftInvite(
+    recipientEmail: string,
+    senderName: string,
+    journeyTitle: string,
+  ): Promise<void> {
+    this.logger.warn(
+      `[stub email/sms] Gift invite for ${recipientEmail}: ${senderName} has gifted you ` +
+        `"${journeyTitle}" — sign up with this email to see it. ` +
+        '(no provider configured — wire one up in NotificationService)',
+    );
+    return Promise.resolve();
+  }
+
+  /** Section 4: the recipient already has an account — this points them at the reveal, not a signup flow. */
+  sendGiftUnlocked(
+    recipientEmail: string,
+    senderName: string,
+    journeyTitle: string,
+  ): Promise<void> {
+    this.logger.warn(
+      `[stub email/sms] Gift unlocked for ${recipientEmail}: ${senderName} has gifted you ` +
+        `"${journeyTitle}" — open Heirloom to see it. ` +
+        '(no provider configured — wire one up in NotificationService)',
+    );
+    return Promise.resolve();
+  }
 }

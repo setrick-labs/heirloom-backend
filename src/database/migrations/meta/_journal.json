@@ -36,6 +36,13 @@
       "when": 1786054525794,
       "tag": "0004_vault_items_person_scoped",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786095935174,
+      "tag": "0005_gifts_journey_targeted",
+      "breakpoints": true
     }
   ]
 }

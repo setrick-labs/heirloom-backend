@@ -22,6 +22,7 @@ import {
   hashToken,
 } from '../../shared/utils/auth-tokens.util';
 import { resolveActiveFamilyId } from '../../shared/utils/family-membership.util';
+import { GiftsService } from '../gifts/gifts.service';
 import type {
   ForgotPasswordInput,
   ResendVerificationInput,
@@ -42,6 +43,8 @@ export interface SafeUser {
   phone: string | null;
   name: string;
   activeFamilyId: string | null;
+  /** Gifting spec Section 5: drives the onboarding-gate carve-out for a gift-invite signup. */
+  hasUnclaimedGift: boolean;
 }
 
 type UserRow = typeof users.$inferSelect;
@@ -52,6 +55,7 @@ export class AuthService {
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly jwtService: JwtService,
     private readonly notificationService: NotificationService,
+    private readonly giftsService: GiftsService,
   ) {}
 
   async signUp(input: SignUpInput): Promise<{ identifier: string }> {
@@ -126,6 +130,15 @@ export class AuthService {
       .set({ status: 'active', updatedAt: new Date() })
       .where(eq(users.id, user.id))
       .returning();
+
+    // Gifting spec Section 3/5: resolves any Gift(s) waiting on this exact
+    // email — whether they signed up right after an invite, or years later.
+    if (activated.email) {
+      await this.giftsService.resolveRecipientForEmail(
+        activated.id,
+        activated.email,
+      );
+    }
 
     return this.buildSession(activated);
   }
@@ -366,7 +379,10 @@ export class AuthService {
         .where(eq(users.id, user.id));
     }
 
-    const tokens = await this.issueTokens(user.id);
+    const [tokens, hasUnclaimedGift] = await Promise.all([
+      this.issueTokens(user.id),
+      this.giftsService.hasUnclaimedGift(user.id),
+    ]);
     return {
       ...tokens,
       user: {
@@ -375,6 +391,7 @@ export class AuthService {
         phone: user.phone,
         name: user.name,
         activeFamilyId,
+        hasUnclaimedGift,
       },
     };
   }

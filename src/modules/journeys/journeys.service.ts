@@ -22,6 +22,7 @@ import {
   requireJourneyAccess,
   requireJourneyOwner,
 } from '../../shared/utils/journey-access.util';
+import { GiftsService } from '../gifts/gifts.service';
 import type { JourneyMemberView } from './validations/journey-member.schema';
 import {
   AddJourneyMembersInput,
@@ -35,7 +36,10 @@ type JourneyRow = typeof journeys.$inferSelect;
 
 @Injectable()
 export class JourneysService {
-  constructor(@Inject(DATABASE_CONNECTION) private readonly db: Database) {}
+  constructor(
+    @Inject(DATABASE_CONNECTION) private readonly db: Database,
+    private readonly giftsService: GiftsService,
+  ) {}
 
   async create(userId: string, input: CreateJourneyInput): Promise<Journey> {
     if (!(await isActiveFamilyMember(this.db, userId, input.familyId))) {
@@ -301,6 +305,10 @@ export class JourneysService {
       .set({ deletedAt: new Date() })
       .where(eq(journeys.id, journeyId))
       .returning();
+    // Gifting spec Section 7: a Gift pointing at a deleted Journey has
+    // nothing left to deliver — fail it gracefully rather than let it try
+    // to send an invite/reveal for content that no longer exists.
+    await this.giftsService.cancelAllForJourney(journeyId);
     return this.withComputedFields(userId, updated);
   }
 

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 
@@ -40,6 +41,8 @@ import { SharedModule } from './shared/shared.module';
     ThrottlerModule.forRoot([
       { name: 'default', ttl: env.THROTTLE_TTL_MS, limit: env.THROTTLE_LIMIT },
     ]),
+    // Drives GiftsService's unlock sweep (Gifting spec Section 3).
+    ScheduleModule.forRoot(),
     DatabaseModule,
     SharedModule,
     AuthModule,
