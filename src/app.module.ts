@@ -33,9 +33,22 @@ import { SharedModule } from './shared/shared.module';
         level: env.LOG_LEVEL,
         transport:
           env.NODE_ENV === 'development'
-            ? { target: 'pino-pretty' }
+            ? {
+                target: 'pino-pretty',
+                // Only the message line (method + path + status) — the full
+                // req/res objects (headers, IP, etc.) are noise for local dev.
+                options: { singleLine: true, ignore: 'pid,hostname,req,res,context,responseTime' },
+              }
             : undefined,
         autoLogging: true,
+        // Trims what's actually attached to the log record, not just what
+        // pino-pretty displays — keeps production JSON logs minimal too.
+        serializers: {
+          req: (req) => ({ method: req.method, url: req.url }),
+          res: (res) => ({ statusCode: res.statusCode }),
+        },
+        customSuccessMessage: (req, res) => `${req.method} ${req.url} -> ${res.statusCode}`,
+        customErrorMessage: (req, res, err) => `${req.method} ${req.url} -> ${res.statusCode} (${err.message})`,
       },
     }),
     ThrottlerModule.forRoot([
