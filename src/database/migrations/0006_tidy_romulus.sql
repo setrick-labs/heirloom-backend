@@ -1,0 +1,6 @@
+-- No-op: drizzle-kit generated this by diffing against a stale snapshot
+-- (0004 and 0005 were hand-written --custom migrations, which don't update
+-- the snapshot chain that `generate` diffs against). The schema changes it
+-- describes were already applied for real via those two migrations — this
+-- file exists only so the migration/snapshot bookkeeping catches up to
+-- match the database's actual state, without touching it again.
