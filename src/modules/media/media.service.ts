@@ -163,12 +163,8 @@ export class MediaService {
     }
   }
 
-  /** Resolves a servable URL for the stored key: public CDN if configured, else a fresh presigned download URL. */
   private async resolveUrl(storageKey: string): Promise<string> {
-    return (
-      this.storageService.buildPublicUrl(storageKey) ??
-      this.storageService.generatePresignedDownloadUrl(storageKey)
-    );
+    return this.storageService.generatePresignedDownloadUrl(storageKey);
   }
 
   private async toDto(row: typeof media.$inferSelect): Promise<Media> {

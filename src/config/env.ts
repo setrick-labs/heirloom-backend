@@ -16,6 +16,14 @@ function optionalString(inner: z.ZodString) {
   );
 }
 
+/** Plain z.coerce.boolean() would treat the string "false" as true — this only ever reads it as literally "true". */
+function booleanString(defaultValue: boolean) {
+  return z.preprocess((value) => {
+    if (value === '' || value === undefined) return defaultValue;
+    return value === 'true';
+  }, z.boolean());
+}
+
 export const envSchema = z.object({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
@@ -41,14 +49,30 @@ export const envSchema = z.object({
   THROTTLE_TTL_MS: z.coerce.number().int().positive().default(60_000),
   THROTTLE_LIMIT: z.coerce.number().int().positive().default(10),
 
-  // Cloudflare R2 (S3-compatible). Optional so the app can boot without them
-  // configured yet; shared/services/storage.service.ts throws a clear error
-  // if a caller actually tries to use storage while these are unset.
-  R2_ACCOUNT_ID: optionalString(z.string().min(1)),
-  R2_ACCESS_KEY_ID: optionalString(z.string().min(1)),
-  R2_SECRET_ACCESS_KEY: optionalString(z.string().min(1)),
-  R2_BUCKET_NAME: optionalString(z.string().min(1)),
-  R2_PUBLIC_URL: optionalString(z.string().url()),
+  // Object storage — any S3-compatible service (Cloudflare R2 in production;
+  // a self-hosted SeaweedFS S3 gateway, MinIO, etc. for local/dev use before
+  // R2 is set up). Named to match the standard AWS SDK env vars
+  // (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION) rather than a
+  // provider-specific prefix, since the same client works against any of
+  // them — only S3_ENDPOINT changes between providers. Optional so the app
+  // can boot without them configured yet; shared/services/storage.service.ts
+  // throws a clear error if a caller actually tries to use storage while
+  // these are unset.
+  AWS_ACCESS_KEY_ID: optionalString(z.string().min(1)),
+  AWS_SECRET_ACCESS_KEY: optionalString(z.string().min(1)),
+  // R2/SeaweedFS/MinIO all accept 'auto' and ignore it; a real AWS S3 bucket
+  // needs its actual region (e.g. 'us-east-1').
+  AWS_REGION: z.string().min(1).default('auto'),
+  // Explicit endpoint — required for R2 and any self-hosted service (e.g.
+  // "https://{accountId}.r2.cloudflarestorage.com" for R2, or
+  // "https://your-seaweedfs-host" for SeaweedFS). Leave unset only for real
+  // AWS S3, which resolves its own endpoint from AWS_REGION.
+  S3_ENDPOINT: optionalString(z.string().url()),
+  // SeaweedFS/MinIO typically need path-style URLs (host/bucket/key) rather
+  // than virtual-hosted style (bucket.host/key). Leave false for R2 or real
+  // AWS S3; set true for SeaweedFS.
+  S3_FORCE_PATH_STYLE: booleanString(false),
+  S3_BUCKET_NAME: optionalString(z.string().min(1)),
 
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])

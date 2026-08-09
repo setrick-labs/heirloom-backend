@@ -198,11 +198,13 @@ export class VaultService {
     return user;
   }
 
+  /**
+   * Vault spec Section 3/5: content here must never be reachable without a
+   * per-request signature — always a short-lived presigned URL, no
+   * unsigned/public serving path, ever.
+   */
   private async resolveUrl(storageKey: string): Promise<string> {
-    return (
-      this.storageService.buildPublicUrl(storageKey) ??
-      this.storageService.generatePresignedDownloadUrl(storageKey)
-    );
+    return this.storageService.generatePresignedDownloadUrl(storageKey);
   }
 
   private async toDto(row: typeof vaultItems.$inferSelect): Promise<VaultItem> {
