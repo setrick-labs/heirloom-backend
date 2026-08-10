@@ -23,6 +23,8 @@ import {
 } from '../../shared/utils/auth-tokens.util';
 import { resolveActiveFamilyId } from '../../shared/utils/family-membership.util';
 import { GiftsService } from '../gifts/gifts.service';
+import { UsersService } from '../users/users.service';
+import type { User } from '../users/validations/user.schema';
 import type {
   ForgotPasswordInput,
   ResendVerificationInput,
@@ -37,15 +39,16 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
-export interface SafeUser {
-  id: string;
-  email: string | null;
-  phone: string | null;
-  name: string;
-  activeFamilyId: string | null;
+/**
+ * Same shape UsersService.toDto returns for every other endpoint (role,
+ * createdAt, updatedAt included) plus one auth-only extra field — kept as a
+ * type alias, not a hand-rolled subset, so a session's `user` can never again
+ * silently drift from what the rest of the API returns.
+ */
+export type SafeUser = User & {
   /** Gifting spec Section 5: drives the onboarding-gate carve-out for a gift-invite signup. */
   hasUnclaimedGift: boolean;
-}
+};
 
 type UserRow = typeof users.$inferSelect;
 
@@ -56,6 +59,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly notificationService: NotificationService,
     private readonly giftsService: GiftsService,
+    private readonly usersService: UsersService,
   ) {}
 
   async signUp(input: SignUpInput): Promise<{ identifier: string }> {
@@ -378,21 +382,21 @@ export class AuthService {
         .set({ activeFamilyId })
         .where(eq(users.id, user.id));
     }
+    // toDto derives `role` from this row's activeFamilyId, so it needs the
+    // just-resolved value, not the possibly-stale one still on `user`.
+    const freshUser =
+      activeFamilyId === user.activeFamilyId
+        ? user
+        : { ...user, activeFamilyId };
 
-    const [tokens, hasUnclaimedGift] = await Promise.all([
+    const [tokens, hasUnclaimedGift, userDto] = await Promise.all([
       this.issueTokens(user.id),
       this.giftsService.hasUnclaimedGift(user.id),
+      this.usersService.toDto(freshUser),
     ]);
     return {
       ...tokens,
-      user: {
-        id: user.id,
-        email: user.email,
-        phone: user.phone,
-        name: user.name,
-        activeFamilyId,
-        hasUnclaimedGift,
-      },
+      user: { ...userDto, hasUnclaimedGift },
     };
   }
 

@@ -5,6 +5,7 @@ import { PassportModule } from '@nestjs/passport';
 import { env } from '../../config/env';
 import { asDuration } from '../../shared/types/duration';
 import { GiftsModule } from '../gifts/gifts.module';
+import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
@@ -22,6 +23,10 @@ import { JwtStrategy } from './jwt.strategy';
     // verified account, and flagging it on the session for the onboarding
     // carve-out.
     GiftsModule,
+    // Reuses UsersService.toDto so a session's `user` is shaped identically
+    // to every other endpoint's User response (role/createdAt/updatedAt
+    // included) instead of a hand-rolled, drifted subset.
+    UsersModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

@@ -89,7 +89,8 @@ export class UsersService {
     return this.toDto(updated);
   }
 
-  private async toDto(row: typeof users.$inferSelect): Promise<User> {
+  /** Public so other modules (e.g. AuthService, building a post sign-in/verify session) shape a user row identically instead of drifting out of sync with a hand-rolled subset. */
+  async toDto(row: typeof users.$inferSelect): Promise<User> {
     const membership = row.activeFamilyId
       ? await getFamilyMembership(this.db, row.id, row.activeFamilyId)
       : undefined;
