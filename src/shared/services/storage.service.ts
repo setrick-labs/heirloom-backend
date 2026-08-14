@@ -5,6 +5,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import type { Readable } from 'node:stream';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   Injectable,
@@ -116,5 +117,44 @@ export class StorageService {
   async deleteObject(key: string): Promise<void> {
     const { client, bucket } = this.requireClient();
     await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  }
+
+  /**
+   * Server-side fetch of an object's bytes — used only by
+   * MediaProcessingService right after a client's direct-to-bucket upload
+   * completes, to generate resized variants + a blurhash. Everything else
+   * in the app deliberately avoids routing file bytes through this server.
+   */
+  async getObjectBuffer(key: string): Promise<Buffer> {
+    const { client, bucket } = this.requireClient();
+    const result = await client.send(
+      new GetObjectCommand({ Bucket: bucket, Key: key }),
+    );
+    const stream = result.Body as Readable;
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.from(chunk as Uint8Array));
+    }
+    return Buffer.concat(chunks);
+  }
+
+  async putObject(
+    key: string,
+    body: Buffer,
+    contentType: string,
+  ): Promise<void> {
+    const { client, bucket } = this.requireClient();
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        // Variant keys are content-addressed (derived from the immutable
+        // original's key) and never rewritten in place — safe to cache
+        // for as long as a client wants to.
+        CacheControl: 'public, max-age=31536000, immutable',
+      }),
+    );
   }
 }

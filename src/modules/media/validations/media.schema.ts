@@ -16,6 +16,7 @@ export const mediaSchema = z.object({
   type: mediaTypeSchema,
   url: z.url(),
   thumbnailUrl: z.url().nullable().optional(),
+  blurhash: z.string().nullable().optional(),
   caption: z.string().max(500).nullable().optional(),
   width: z.number().int().positive().nullable().optional(),
   height: z.number().int().positive().nullable().optional(),

@@ -9,6 +9,7 @@ import { StorageService } from '../../shared/services/storage.service';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
 import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
 import { requireMediaOwner } from '../../shared/utils/media-access.util';
+import { MediaProcessingService } from './media-processing.service';
 import { assertValidMediaUpload } from './media-upload-policy';
 import {
   CreateMediaInput,
@@ -31,6 +32,7 @@ export class MediaService {
   constructor(
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly storageService: StorageService,
+    private readonly mediaProcessingService: MediaProcessingService,
   ) {}
 
   /**
@@ -98,6 +100,17 @@ export class MediaService {
         ownerId,
       })
       .returning();
+
+    // Fire-and-forget: this response must not wait on a multi-second
+    // fetch+resize+upload round trip. The client gets the original as its
+    // url/thumbnailUrl for now (toDto()'s built-in fallback); the next time
+    // it fetches this media id, the variants will be in place. See
+    // MediaProcessingService.processAndPersist for why this is safe to not await.
+    void this.mediaProcessingService.processAndPersist(
+      created.id,
+      created.storageKey,
+      input.type,
+    );
     return this.toDto(created);
   }
 
@@ -168,13 +181,20 @@ export class MediaService {
   }
 
   private async toDto(row: typeof media.$inferSelect): Promise<Media> {
+    // Falls back to the original whenever a variant key is unset — non-image
+    // media, or an image whose processing pass failed/hasn't run yet.
+    const [url, thumbnailUrl] = await Promise.all([
+      this.resolveUrl(row.displayStorageKey ?? row.storageKey),
+      this.resolveUrl(row.thumbnailStorageKey ?? row.storageKey),
+    ]);
     return {
       id: row.id,
       familyId: row.familyId,
       ownerId: row.ownerId,
       type: row.type,
-      url: await this.resolveUrl(row.storageKey),
-      thumbnailUrl: row.thumbnailUrl,
+      url,
+      thumbnailUrl,
+      blurhash: row.blurhash,
       caption: row.caption,
       width: row.width,
       height: row.height,

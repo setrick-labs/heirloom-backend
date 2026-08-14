@@ -17,6 +17,7 @@ import {
   reactions,
 } from '../../database/schema';
 import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
+import { MediaProcessingService } from '../media/media-processing.service';
 import {
   CreateMilestoneInput,
   Milestone,
@@ -28,7 +29,10 @@ type JourneyRow = typeof journeys.$inferSelect;
 
 @Injectable()
 export class MilestonesService {
-  constructor(@Inject(DATABASE_CONNECTION) private readonly db: Database) {}
+  constructor(
+    @Inject(DATABASE_CONNECTION) private readonly db: Database,
+    private readonly mediaProcessingService: MediaProcessingService,
+  ) {}
 
   /** Section 1: any visibility member, not owner-gated; requires the first media atomically. */
   async create(
@@ -46,37 +50,58 @@ export class MilestonesService {
     const date = input.date ? new Date(input.date) : new Date();
     const title = input.title?.trim() || formatDateLabel(date);
 
-    const milestone = await this.db.transaction(async (tx) => {
-      const [created] = await tx
-        .insert(milestones)
-        .values({
-          id: input.id,
-          journeyId: input.journeyId,
-          title,
-          description: input.description,
-          date,
-          location: input.location,
-          createdBy: userId,
-        })
-        .returning();
+    const { milestone, createdMedia } = await this.db.transaction(
+      async (tx) => {
+        const [created] = await tx
+          .insert(milestones)
+          .values({
+            id: input.id,
+            journeyId: input.journeyId,
+            title,
+            description: input.description,
+            date,
+            location: input.location,
+            createdBy: userId,
+          })
+          .returning();
 
-      await tx.insert(media).values({
-        familyId: journey.familyId,
-        milestoneId: created.id,
-        ownerId: userId,
-        type: input.media.type,
-        storageKey: input.media.key,
-        caption: input.media.caption,
-        sizeBytes: input.media.sizeBytes,
-      });
+        const [createdMedia] = await tx
+          .insert(media)
+          .values({
+            familyId: journey.familyId,
+            milestoneId: created.id,
+            ownerId: userId,
+            type: input.media.type,
+            storageKey: input.media.key,
+            caption: input.media.caption,
+            sizeBytes: input.media.sizeBytes,
+          })
+          .returning();
 
-      return created;
-    });
+        return { milestone: created, createdMedia };
+      },
+    );
+
+    // Fire-and-forget — same reasoning as MediaService.create().
+    void this.mediaProcessingService.processAndPersist(
+      createdMedia.id,
+      createdMedia.storageKey,
+      input.media.type,
+    );
 
     return this.withComputedFields(userId, journey, milestone);
   }
 
-  /** Chronological by memory date (Section 6), not upload order. */
+  /**
+   * Chronological by memory date (Section 6), not upload order.
+   *
+   * Batched rather than delegating to withComputedFields per row — that
+   * path does 4 sequential queries per milestone (media, reaction count,
+   * other-comments, other-reactions), which was a genuine N+1: an 8-
+   * milestone journey meant 32 round trips just to render the map. Here
+   * everything is fetched in at most 4 queries total for the whole journey
+   * and grouped in memory by milestoneId/mediaId.
+   */
   async listByJourney(userId: string, journeyId: string): Promise<Milestone[]> {
     await requireJourneyAccess(this.db, userId, journeyId);
     const journey = await this.db.query.journeys.findFirst({
@@ -93,9 +118,116 @@ export class MilestonesService {
       ),
       orderBy: asc(milestones.date),
     });
-    return Promise.all(
-      rows.map((row) => this.withComputedFields(userId, journey, row)),
-    );
+    if (rows.length === 0) return [];
+
+    const milestoneIds = rows.map((row) => row.id);
+    const mediaRows = await this.db
+      .select({
+        id: media.id,
+        milestoneId: media.milestoneId,
+        createdAt: media.createdAt,
+        ownerId: media.ownerId,
+      })
+      .from(media)
+      .where(inArray(media.milestoneId, milestoneIds));
+
+    const mediaIdsByMilestoneId = new Map<string, string[]>();
+    const mediaIdToMilestoneId = new Map<string, string>();
+    for (const m of mediaRows) {
+      if (!m.milestoneId) continue;
+      mediaIdToMilestoneId.set(m.id, m.milestoneId);
+      const list = mediaIdsByMilestoneId.get(m.milestoneId);
+      if (list) list.push(m.id);
+      else mediaIdsByMilestoneId.set(m.milestoneId, [m.id]);
+    }
+    const allMediaIds = mediaRows.map((m) => m.id);
+
+    const [reactionCounts, otherComments, otherReactions] = allMediaIds.length
+      ? await Promise.all([
+          this.db
+            .select({ targetId: reactions.targetId, value: count() })
+            .from(reactions)
+            .where(
+              and(
+                eq(reactions.targetType, 'media'),
+                inArray(reactions.targetId, allMediaIds),
+              ),
+            )
+            .groupBy(reactions.targetId),
+          this.db
+            .select({
+              targetId: comments.targetId,
+              createdAt: comments.createdAt,
+            })
+            .from(comments)
+            .where(
+              and(
+                eq(comments.targetType, 'media'),
+                inArray(comments.targetId, allMediaIds),
+                ne(comments.authorId, userId),
+              ),
+            ),
+          this.db
+            .select({
+              targetId: reactions.targetId,
+              createdAt: reactions.createdAt,
+            })
+            .from(reactions)
+            .where(
+              and(
+                eq(reactions.targetType, 'media'),
+                inArray(reactions.targetId, allMediaIds),
+                ne(reactions.userId, userId),
+              ),
+            ),
+        ])
+      : [[], [], []];
+
+    const reactionCountByMilestoneId = new Map<string, number>();
+    for (const r of reactionCounts) {
+      const milestoneId = mediaIdToMilestoneId.get(r.targetId);
+      if (!milestoneId) continue;
+      reactionCountByMilestoneId.set(
+        milestoneId,
+        (reactionCountByMilestoneId.get(milestoneId) ?? 0) + r.value,
+      );
+    }
+
+    const activityTimestampsByMilestoneId = new Map<string, Date[]>();
+    const pushActivity = (milestoneId: string | undefined, date: Date) => {
+      if (!milestoneId) return;
+      const list = activityTimestampsByMilestoneId.get(milestoneId);
+      if (list) list.push(date);
+      else activityTimestampsByMilestoneId.set(milestoneId, [date]);
+    };
+    for (const m of mediaRows) {
+      if (m.ownerId !== userId)
+        pushActivity(m.milestoneId ?? undefined, m.createdAt);
+    }
+    for (const c of otherComments) {
+      pushActivity(mediaIdToMilestoneId.get(c.targetId), c.createdAt);
+    }
+    for (const r of otherReactions) {
+      pushActivity(mediaIdToMilestoneId.get(r.targetId), r.createdAt);
+    }
+
+    return rows.map((row) => {
+      const timestamps = [
+        ...(activityTimestampsByMilestoneId.get(row.id) ?? []),
+      ];
+      if (row.createdBy !== userId) timestamps.push(row.updatedAt);
+      const lastOtherActivityAt = timestamps.length
+        ? new Date(Math.max(...timestamps.map((d) => d.getTime())))
+        : null;
+      return this.toDto(
+        userId,
+        row,
+        journey,
+        mediaIdsByMilestoneId.get(row.id) ?? [],
+        reactionCountByMilestoneId.get(row.id) ?? 0,
+        lastOtherActivityAt,
+      );
+    });
   }
 
   async findById(userId: string, id: string): Promise<Milestone> {

@@ -32,4 +32,17 @@ export const StorageKeys = {
   vaultItem({ userId, extension }: VaultItemKeyParams): string {
     return `${userId}/vault/${randomUUID()}.${extension}`;
   },
+
+  /**
+   * Deterministic sibling key for a resized variant of an original object
+   * — same path/uuid, `-{variant}.webp` appended in place of the original
+   * extension. Keeps variants co-located with their original without a
+   * separate lookup table.
+   */
+  mediaVariant(originalKey: string, variant: 'thumb' | 'display'): string {
+    const lastDot = originalKey.lastIndexOf('.');
+    const withoutExtension =
+      lastDot === -1 ? originalKey : originalKey.slice(0, lastDot);
+    return `${withoutExtension}-${variant}.webp`;
+  },
 };

@@ -1,0 +1,1 @@
+ALTER TABLE "media" DROP COLUMN "thumbnail_url";

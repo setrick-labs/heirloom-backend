@@ -35,6 +35,20 @@ export const journeyVisibilityEnum = pgEnum('journey_visibility', [
 export const mediaTypeEnum = pgEnum('media_type', ['image', 'video', 'audio']);
 
 /**
+ * Tracks the async variant/blurhash pass (see MediaProcessingService).
+ * Null for non-image media, which is never processed. Set to 'pending' at
+ * insert time — before the fire-and-forget pass even starts — so a crash
+ * mid-processing leaves a visibly stuck row instead of one indistinguishable
+ * from "not applicable"; scripts/retry-failed-media.ts queries for both
+ * 'failed' and long-stuck 'pending' rows.
+ */
+export const mediaProcessingStatusEnum = pgEnum('media_processing_status', [
+  'pending',
+  'done',
+  'failed',
+]);
+
+/**
  * Polymorphic target kind for comments/reactions. `moment` and `event` don't
  * have their own tables (they're computed views over media/milestones), but
  * the tag is kept here so comments/reactions can still reference them.

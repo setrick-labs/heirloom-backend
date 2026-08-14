@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, max } from 'drizzle-orm';
 
 import { env } from '../../config/env';
 import { DATABASE_CONNECTION } from '../../database/database.module';
@@ -108,9 +108,56 @@ export class JourneysService {
         myMemberJourneyIds.has(row.id),
     );
 
-    const dtos = await Promise.all(
-      visible.map((row) => this.withComputedFields(userId, row)),
+    // Batched instead of one count + one max(createdAt) query per journey
+    // (was N+1 — a 10-journey family meant 20 extra round trips here).
+    const visibleIds = visible.map((row) => row.id);
+    const [counts, latestActivity] = visibleIds.length
+      ? await Promise.all([
+          this.db
+            .select({ journeyId: milestones.journeyId, value: count() })
+            .from(milestones)
+            .where(
+              and(
+                inArray(milestones.journeyId, visibleIds),
+                isNull(milestones.deletedAt),
+              ),
+            )
+            .groupBy(milestones.journeyId),
+          this.db
+            .select({
+              journeyId: milestones.journeyId,
+              latest: max(milestones.createdAt),
+            })
+            .from(milestones)
+            .where(
+              and(
+                inArray(milestones.journeyId, visibleIds),
+                isNull(milestones.deletedAt),
+              ),
+            )
+            .groupBy(milestones.journeyId),
+        ])
+      : [[], []];
+    const countByJourneyId = new Map(
+      counts.map((row) => [row.journeyId, row.value]),
     );
+    const latestByJourneyId = new Map(
+      latestActivity.map((row) => [row.journeyId, row.latest]),
+    );
+
+    const dtos = visible.map((row) => {
+      const latestMilestoneAt = latestByJourneyId.get(row.id);
+      const lastActivityAt =
+        latestMilestoneAt && latestMilestoneAt > row.updatedAt
+          ? latestMilestoneAt
+          : row.updatedAt;
+      return this.toDto(
+        userId,
+        row,
+        countByJourneyId.get(row.id) ?? 0,
+        lastActivityAt,
+      );
+    });
     return dtos.sort(
       (a, b) =>
         new Date(b.lastActivityAt).getTime() -
