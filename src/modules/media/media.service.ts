@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 
 import { DATABASE_CONNECTION } from '../../database/database.module';
@@ -123,7 +129,22 @@ export class MediaService {
     const rows = await this.db.query.media.findMany({
       where: eq(media.familyId, familyId),
     });
-    return Promise.all(rows.map((row) => this.toDto(row)));
+    // toDto() throws for an image that's confirmed unrenderable (see
+    // below) — one such item shouldn't 500 an entire family's media list,
+    // so those are dropped here rather than propagated.
+    const dtos = await Promise.all(
+      rows.map(async (row) => {
+        try {
+          return await this.toDto(row);
+        } catch (error) {
+          this.logger.warn(
+            `Skipping unrenderable media ${row.id} in list: ${error}`,
+          );
+          return null;
+        }
+      }),
+    );
+    return dtos.filter((dto): dto is Media => dto !== null);
   }
 
   async findById(userId: string, id: string): Promise<Media> {
@@ -183,6 +204,28 @@ export class MediaService {
   }
 
   private async toDto(row: typeof media.$inferSelect): Promise<Media> {
+    // Falling back to the original is fine for most failure causes (a
+    // transient fetch error, an oversized-but-valid PNG, processing that
+    // just hasn't run yet) — any normal client can still render the
+    // original in those cases. It is NOT fine when the original itself is
+    // in a format no processing pass will ever fix and that Android can't
+    // reliably render un-decoded (verified against a live HEIC upload —
+    // see MediaProcessingService). Once processing has actually run and
+    // confirmed that, refuse to hand back the broken original instead of
+    // silently serving an image that won't display.
+    if (
+      row.type === 'image' &&
+      row.processingStatus === 'failed' &&
+      !row.displayStorageKey &&
+      StorageKeys.hasUnrenderableExtension(row.storageKey)
+    ) {
+      throw new UnprocessableEntityException({
+        code: 'MEDIA_PROCESSING_FAILED',
+        message:
+          "This photo couldn't be processed and can't be displayed — its format isn't supported.",
+      });
+    }
+
     // Falls back to the original whenever a variant key is unset — non-image
     // media, or an image whose processing pass failed/hasn't run yet.
     const [url, thumbnailUrl] = await Promise.all([

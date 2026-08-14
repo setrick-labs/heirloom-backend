@@ -45,4 +45,16 @@ export const StorageKeys = {
       lastDot === -1 ? originalKey : originalKey.slice(0, lastDot);
     return `${withoutExtension}-${variant}.webp`;
   },
+
+  /**
+   * True for extensions no mainstream mobile client can reliably render
+   * un-decoded — currently just HEIC/HEIF. Verified against a live upload:
+   * sharp's prebuilt libvips has no HEVC decoder, so these always fail
+   * MediaProcessingService (see media.service.ts's toDto, which uses this
+   * to decide whether falling back to the original is actually safe, or
+   * whether the whole media item has to be treated as unavailable).
+   */
+  hasUnrenderableExtension(key: string): boolean {
+    return /\.(heic|heif)$/i.test(key);
+  },
 };
