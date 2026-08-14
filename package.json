@@ -23,7 +23,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "storage:verify": "tsx scripts/verify-storage.ts",
-    "seed:demo-user": "tsx scripts/seed-demo-user.ts",
+    "db:wipe": "tsx scripts/wipe-db.ts",
+    "db:seed": "tsx scripts/seed-full-dataset.ts",
     "media:retry-failed": "tsx scripts/retry-failed-media.ts"
   },
   "dependencies": {

@@ -47,7 +47,10 @@ async function main() {
 
   let uploadUrl: string | undefined;
   await run('Generate presigned upload URL', async () => {
-    uploadUrl = await storage.generatePresignedUploadUrl(TEST_KEY, TEST_CONTENT_TYPE);
+    uploadUrl = await storage.generatePresignedUploadUrl(
+      TEST_KEY,
+      TEST_CONTENT_TYPE,
+    );
     return TEST_KEY;
   });
 
@@ -59,7 +62,9 @@ async function main() {
       body: TEST_CONTENT,
     });
     if (!response.ok) {
-      throw new Error(`PUT failed with status ${response.status}: ${await response.text()}`);
+      throw new Error(
+        `PUT failed with status ${response.status}: ${await response.text()}`,
+      );
     }
   });
 
@@ -72,7 +77,9 @@ async function main() {
     }
     const body = await response.text();
     if (body !== TEST_CONTENT) {
-      throw new Error(`Downloaded content did not match what was uploaded (got: ${body.slice(0, 80)})`);
+      throw new Error(
+        `Downloaded content did not match what was uploaded (got: ${body.slice(0, 80)})`,
+      );
     }
   });
 
