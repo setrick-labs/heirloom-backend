@@ -64,6 +64,13 @@
       "when": 1786665479035,
       "tag": "0008_media_variants_blurhash_and_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786666321800,
+      "tag": "0009_media_processing_status",
+      "breakpoints": true
     }
   ]
 }

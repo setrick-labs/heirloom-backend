@@ -98,6 +98,8 @@ export class MediaService {
         caption: input.caption,
         sizeBytes: input.sizeBytes,
         ownerId,
+        // Set before the fire-and-forget pass even starts — see enums.ts.
+        processingStatus: input.type === 'image' ? 'pending' : undefined,
       })
       .returning();
 

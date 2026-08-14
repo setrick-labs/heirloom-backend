@@ -75,6 +75,8 @@ export class MilestonesService {
             storageKey: input.media.key,
             caption: input.media.caption,
             sizeBytes: input.media.sizeBytes,
+            processingStatus:
+              input.media.type === 'image' ? 'pending' : undefined,
           })
           .returning();
 

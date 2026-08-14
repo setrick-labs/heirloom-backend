@@ -66,7 +66,10 @@ export class MediaProcessingService {
     if (type !== 'image') return;
     try {
       const result = await this.processImage(storageKey);
-      if (!result) return;
+      if (!result) {
+        await this.markFailed(mediaId);
+        return;
+      }
       await this.db
         .update(media)
         .set({
@@ -75,11 +78,27 @@ export class MediaProcessingService {
           blurhash: result.blurhash,
           width: result.width,
           height: result.height,
+          processingStatus: 'done',
         })
         .where(eq(media.id, mediaId));
     } catch (error) {
       this.logger.warn(
         `Failed to persist processed variants for media ${mediaId}: ${error}`,
+      );
+      await this.markFailed(mediaId);
+    }
+  }
+
+  /** Best-effort — if even this update fails, the row is left 'pending' and scripts/retry-failed-media.ts still picks it up via the stuck-pending check. */
+  private async markFailed(mediaId: string): Promise<void> {
+    try {
+      await this.db
+        .update(media)
+        .set({ processingStatus: 'failed' })
+        .where(eq(media.id, mediaId));
+    } catch (error) {
+      this.logger.warn(
+        `Failed to mark media ${mediaId} as processing_status='failed': ${error}`,
       );
     }
   }
