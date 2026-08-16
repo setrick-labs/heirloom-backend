@@ -60,6 +60,18 @@ export const contentTargetTypeEnum = pgEnum('content_target_type', [
   'event',
 ]);
 
+/**
+ * What a content_views row tracks. Deliberately narrower than
+ * contentTargetTypeEnum above: read state is only ever recorded for the two
+ * surfaces the flow puts an unread badge on — a Journey card on Home
+ * (Screen 17) and a Milestone card in the timeline (Screen 20) — not for
+ * individual media or comments.
+ */
+export const viewTargetTypeEnum = pgEnum('view_target_type', [
+  'journey',
+  'milestone',
+]);
+
 /** A comment's own content kind — 'version' is how "add your version" reuses this table. */
 export const commentTypeEnum = pgEnum('comment_type', [
   'text',

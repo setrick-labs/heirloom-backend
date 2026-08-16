@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -19,6 +20,8 @@ import { MediaService } from './media.service';
 import {
   type CreateMediaInput,
   createMediaInputSchema,
+  type RequestCoverUploadUrlInput,
+  requestCoverUploadUrlInputSchema,
   type RequestUploadUrlInput,
   requestUploadUrlInputSchema,
 } from './validations/media.schema';
@@ -36,6 +39,15 @@ export class MediaController {
     return this.mediaService.requestUploadUrl(user.id, body);
   }
 
+  /** Screens 12/19 — cover photo for a Family or a Journey. */
+  @Post('cover-upload-url')
+  requestCoverUploadUrl(
+    @Body(new ZodValidationPipe(requestCoverUploadUrlInputSchema))
+    body: RequestCoverUploadUrlInput,
+  ) {
+    return this.mediaService.requestCoverUploadUrl(body);
+  }
+
   /** Section 6: anyone with visibility into the milestone's journey, not just its creator. */
   @Post()
   async create(
@@ -46,12 +58,27 @@ export class MediaController {
     return apiResponse(created, 'Media added');
   }
 
+  /**
+   * Scoped by exactly one of milestoneId (Screen 24's grid) or familyId
+   * (everything the viewer's family has). milestoneId wins when both are
+   * sent — it's strictly narrower, so there's no ambiguity to resolve.
+   */
   @Get()
   list(
     @CurrentUser() user: AuthenticatedUser,
-    @Query('familyId', new ZodValidationPipe(idSchema)) familyId: string,
+    @Query('familyId') familyId?: string,
+    @Query('milestoneId') milestoneId?: string,
   ) {
-    return this.mediaService.listByFamily(user.id, familyId);
+    if (milestoneId) {
+      return this.mediaService.listByMilestone(
+        user.id,
+        idSchema.parse(milestoneId),
+      );
+    }
+    if (familyId) {
+      return this.mediaService.listByFamily(user.id, idSchema.parse(familyId));
+    }
+    throw new BadRequestException('Provide either milestoneId or familyId');
   }
 
   @Get(':id')

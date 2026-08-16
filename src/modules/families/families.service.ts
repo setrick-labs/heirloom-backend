@@ -18,7 +18,10 @@ import {
   families,
   users,
 } from '../../database/schema';
+import { StorageService } from '../../shared/services/storage.service';
 import { generateNumericCode } from '../../shared/utils/auth-tokens.util';
+import { resolveCoverImageUrl } from '../../shared/utils/cover-url.util';
+import { resolveDisplayName } from '../../shared/utils/display-name.util';
 import {
   getFamilyMembership,
   isActiveFamilyMember,
@@ -38,7 +41,10 @@ const INVITE_CODE_MAX_ATTEMPTS = 10;
 
 @Injectable()
 export class FamiliesService {
-  constructor(@Inject(DATABASE_CONNECTION) private readonly db: Database) {}
+  constructor(
+    @Inject(DATABASE_CONNECTION) private readonly db: Database,
+    private readonly storageService: StorageService,
+  ) {}
 
   async create(ownerId: string, input: CreateFamilyInput): Promise<Family> {
     const family = await this.db.transaction(async (tx) => {
@@ -97,6 +103,7 @@ export class FamiliesService {
         userId: familyMembers.userId,
         role: familyMembers.role,
         joinedAt: familyMembers.joinedAt,
+        nickname: familyMembers.nickname,
         displayName: users.name,
       })
       .from(familyMembers)
@@ -113,17 +120,39 @@ export class FamiliesService {
       aliasRows.map((row) => [row.subjectUserId, row.nickname]),
     );
 
-    return rows.map((row) => {
-      const alias = aliasByTarget.get(row.userId);
-      return {
-        userId: row.userId,
-        role: row.role,
-        joinedAt: row.joinedAt.toISOString(),
+    return rows.map((row) => ({
+      userId: row.userId,
+      role: row.role,
+      joinedAt: row.joinedAt.toISOString(),
+      ...resolveDisplayName({
         displayName: row.displayName,
-        resolvedName: alias ?? row.displayName,
-        hasAlias: Boolean(alias),
-      };
-    });
+        nickname: row.nickname,
+        alias: aliasByTarget.get(row.userId),
+      }),
+    }));
+  }
+
+  /**
+   * Screen 14 / Screen 34's own-row "Edit" — the name everyone in this
+   * family sees for you. Self-service only: the viewer is always the
+   * subject, so there's no target-user parameter to authorize.
+   */
+  async setOwnNickname(
+    viewerId: string,
+    familyId: string,
+    nickname: string,
+  ): Promise<void> {
+    await this.requireMember(viewerId, familyId);
+
+    await this.db
+      .update(familyMembers)
+      .set({ nickname })
+      .where(
+        and(
+          eq(familyMembers.familyId, familyId),
+          eq(familyMembers.userId, viewerId),
+        ),
+      );
   }
 
   /** Section 2: private, per-viewer — upserts so re-setting an alias just updates it. */
@@ -314,15 +343,26 @@ export class FamiliesService {
   }
 
   /** Section 8: admin-only, deliberately just a name — no other family settings requested. */
-  async renameFamily(
+  /**
+   * Rename and/or set the cover photo (Screen 12). Both are admin-gated and
+   * both arrive on the same PATCH, so they share one path rather than
+   * splitting into two near-identical owner-checked updates.
+   */
+  async updateFamily(
     adminId: string,
     familyId: string,
-    name: string,
+    input: { name?: string; coverStorageKey?: string | null },
   ): Promise<Family> {
     await this.requireAdmin(adminId, familyId);
     const [updated] = await this.db
       .update(families)
-      .set({ name, updatedAt: new Date() })
+      .set({
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.coverStorageKey !== undefined
+          ? { coverStorageKey: input.coverStorageKey }
+          : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(families.id, familyId))
       .returning();
     if (!updated) {
@@ -582,16 +622,18 @@ export class FamiliesService {
     return this.toDto(row, value);
   }
 
-  private toDto(
+  private async toDto(
     row: typeof families.$inferSelect,
     memberCount: number,
-  ): Family {
+  ): Promise<Family> {
     const deletedAt = row.deletedAt;
     return {
       id: row.id,
       name: row.name,
       description: row.description,
-      coverImageUrl: row.coverImageUrl,
+      // Presigned fresh from coverStorageKey when the photo was uploaded
+      // through the app (Screen 12); falls back to the plain column.
+      coverImageUrl: await resolveCoverImageUrl(this.storageService, row),
       ownerId: row.ownerId,
       memberCount,
       createdAt: row.createdAt.toISOString(),

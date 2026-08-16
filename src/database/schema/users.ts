@@ -61,6 +61,14 @@ export const users = pgTable(
       withTimezone: true,
     }),
 
+    // Vault-specific throttling, mirroring failedLoginAttempts/lockedUntil
+    // above but deliberately separate: flow Screen 46 shows an attempts
+    // counter ("2 attempts left") and a temporary lockout on the Vault
+    // unlock screen, and a wrong vault passcode must never count toward
+    // locking someone out of their whole account.
+    vaultFailedAttempts: integer('vault_failed_attempts').notNull().default(0),
+    vaultLockedUntil: timestamp('vault_locked_until', { withTimezone: true }),
+
     ...timestamps,
   },
   (table) => [

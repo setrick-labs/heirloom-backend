@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
@@ -20,6 +20,7 @@ import { assertValidMediaUpload } from './media-upload-policy';
 import {
   CreateMediaInput,
   Media,
+  RequestCoverUploadUrlInput,
   RequestUploadUrlInput,
 } from './validations/media.schema';
 
@@ -66,6 +67,38 @@ export class MediaService {
       familyId: input.familyId,
       journeyId: input.journeyId,
       milestoneId: input.milestoneId,
+      extension,
+    });
+    const uploadUrl = await this.storageService.generatePresignedUploadUrl(
+      key,
+      input.contentType,
+      UPLOAD_URL_TTL_SECONDS,
+    );
+
+    return { key, uploadUrl, expiresInSeconds: UPLOAD_URL_TTL_SECONDS };
+  }
+
+  /**
+   * Presigned PUT for a Family or Journey cover photo (Screens 12, 19).
+   *
+   * Authorization is deliberately coarse here — any signed-in user can mint
+   * a cover key — because both screens upload the photo *before* the row it
+   * belongs to exists, so there is nothing yet to check membership against.
+   * The real gate is on the other side: the key only ever becomes visible
+   * once an update call that IS access-checked (families.update /
+   * journeys.update, both owner/admin-gated) accepts it as coverStorageKey.
+   * Minting an unreferenced key achieves nothing but an orphaned object.
+   */
+  async requestCoverUploadUrl(
+    input: RequestCoverUploadUrlInput,
+  ): Promise<RequestUploadUrlResult> {
+    const extension = assertValidMediaUpload(
+      input.contentType,
+      input.sizeBytes,
+    );
+    const key = StorageKeys.cover({
+      scope: input.scope,
+      targetId: input.targetId,
       extension,
     });
     const uploadUrl = await this.storageService.generatePresignedUploadUrl(
@@ -129,13 +162,41 @@ export class MediaService {
     const rows = await this.db.query.media.findMany({
       where: eq(media.familyId, familyId),
     });
+    return this.toDtoList(rows);
+  }
+
+  /**
+   * Screen 24's grid — one Milestone's Memories, newest first. Access runs
+   * through the milestone's parent journey, so a media row is never
+   * reachable here that requireJourneyAccess would refuse individually.
+   */
+  async listByMilestone(userId: string, milestoneId: string): Promise<Media[]> {
+    const milestone = await this.db.query.milestones.findFirst({
+      where: and(eq(milestones.id, milestoneId), isNull(milestones.deletedAt)),
+    });
+    if (!milestone) {
+      throw new NotFoundException('Milestone not found');
+    }
+    await requireJourneyAccess(this.db, userId, milestone.journeyId);
+
+    const rows = await this.db.query.media.findMany({
+      where: eq(media.milestoneId, milestoneId),
+      orderBy: desc(media.createdAt),
+    });
+    return this.toDtoList(rows);
+  }
+
+  private async toDtoList(
+    rows: (typeof media.$inferSelect)[],
+  ): Promise<Media[]> {
+    const commentCounts = await this.countCommentsFor(rows.map((r) => r.id));
     // toDto() throws for an image that's confirmed unrenderable (see
-    // below) — one such item shouldn't 500 an entire family's media list,
-    // so those are dropped here rather than propagated.
+    // there) — one such item shouldn't 500 an entire list, so those are
+    // dropped here rather than propagated.
     const dtos = await Promise.all(
       rows.map(async (row) => {
         try {
-          return await this.toDto(row);
+          return await this.toDto(row, commentCounts.get(row.id) ?? 0);
         } catch (error) {
           this.logger.warn(
             `Skipping unrenderable media ${row.id} in list: ${error}`,
@@ -161,7 +222,8 @@ export class MediaService {
       throw new NotFoundException('Media not found');
     }
     await requireJourneyAccess(this.db, userId, milestone.journeyId);
-    return this.toDto(row);
+    const counts = await this.countCommentsFor([row.id]);
+    return this.toDto(row, counts.get(row.id) ?? 0);
   }
 
   /**
@@ -203,7 +265,18 @@ export class MediaService {
     return this.storageService.generatePresignedDownloadUrl(storageKey);
   }
 
-  private async toDto(row: typeof media.$inferSelect): Promise<Media> {
+  /**
+   * `commentCount` backs the small `💬 4` pill Screen 24 puts on any grid
+   * tile with an active discussion — it's the only signal a tile has one
+   * before you open it, so it has to come back with the tile itself rather
+   * than from a second per-tile request. Callers that have a batch of rows
+   * should pass a precomputed map (see countCommentsFor); it defaults to 0
+   * so single-row callers that genuinely don't need it stay simple.
+   */
+  private async toDto(
+    row: typeof media.$inferSelect,
+    commentCount = 0,
+  ): Promise<Media> {
     // Falling back to the original is fine for most failure causes (a
     // transient fetch error, an oversized-but-valid PNG, processing that
     // just hasn't run yet) — any normal client can still render the
@@ -245,7 +318,28 @@ export class MediaService {
       height: row.height,
       durationSeconds: row.durationSeconds,
       sizeBytes: row.sizeBytes,
+      commentCount,
       createdAt: row.createdAt.toISOString(),
     };
+  }
+
+  /** One grouped query for a whole grid's worth of tiles, keyed by media id. */
+  private async countCommentsFor(
+    mediaIds: string[],
+  ): Promise<Map<string, number>> {
+    if (mediaIds.length === 0) {
+      return new Map();
+    }
+    const rows = await this.db
+      .select({ targetId: comments.targetId, value: count() })
+      .from(comments)
+      .where(
+        and(
+          eq(comments.targetType, 'media'),
+          inArray(comments.targetId, mediaIds),
+        ),
+      )
+      .groupBy(comments.targetId);
+    return new Map(rows.map((row) => [row.targetId, row.value]));
   }
 }

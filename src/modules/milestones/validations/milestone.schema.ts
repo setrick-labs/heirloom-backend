@@ -20,6 +20,12 @@ export const milestoneSchema = z.object({
   mediaIds: z.array(idSchema).default([]),
   /** Sum of reactions across all of this milestone's media (Milestones spec Section 5/9). */
   reactionCount: z.number().int().min(0).default(0),
+  /** "12 memories" on Screen 24's header — always equals mediaIds.length. */
+  memoryCount: z.number().int().min(0).default(0),
+  /** "3 contributors" on Screen 24 — distinct people who added a Memory here. */
+  contributorCount: z.number().int().min(0).default(0),
+  /** Memories from other people since this viewer last opened it — the timeline card's badge (Screen 20). */
+  unreadCount: z.number().int().min(0).default(0),
   /**
    * Latest media/comment/reaction timestamp contributed by someone OTHER
    * than the viewer — drives the unread badge (Section 7: a person's own

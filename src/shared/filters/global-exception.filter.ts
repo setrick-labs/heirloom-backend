@@ -32,6 +32,7 @@ interface Resolved {
   status: number;
   code: string;
   message: string;
+  details?: Record<string, unknown>;
 }
 
 /**
@@ -60,7 +61,11 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     const body: ApiErrorResponse = {
       success: false,
-      error: { code: resolved.code, message: resolved.message },
+      error: {
+        code: resolved.code,
+        message: resolved.message,
+        ...(resolved.details ? { details: resolved.details } : {}),
+      },
     };
 
     response.status(resolved.status).json(body);
@@ -104,6 +109,10 @@ export class GlobalExceptionFilter implements ExceptionFilter {
               ? record.code
               : codeForStatus(status),
           message,
+          details:
+            typeof record.details === 'object' && record.details !== null
+              ? (record.details as Record<string, unknown>)
+              : undefined,
         };
       }
 

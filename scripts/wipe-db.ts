@@ -23,10 +23,13 @@ import {
   reactions,
   vaultItems,
   gifts,
+  contentViews,
 } from '../src/database/schema';
 
 // Children before parents, so no FK violation even without CASCADE.
 const TABLES_IN_DELETE_ORDER = [
+  // Polymorphic, references nothing but users — safe to clear first.
+  { name: 'content_views', table: contentViews },
   { name: 'gifts', table: gifts },
   { name: 'reactions', table: reactions },
   { name: 'comments', table: comments },

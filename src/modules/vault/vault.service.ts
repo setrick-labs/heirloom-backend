@@ -63,16 +63,81 @@ export class VaultService {
     return this.issueVaultSession(userId);
   }
 
+  /**
+   * Screen 46: a wrong passcode must never reveal anything about what's
+   * inside, so every failure returns the same shape — just a decrementing
+   * attempts counter, then a short lockout. Deliberately tracked on its own
+   * columns rather than the account's failedLoginAttempts/lockedUntil: a
+   * fumbled vault passcode is not an account compromise signal and must not
+   * lock someone out of Heirloom itself.
+   */
   async unlock(userId: string, input: UnlockVaultInput): Promise<VaultSession> {
     const user = await this.requireUser(userId);
     if (!user.vaultPasswordHash) {
       throw new NotFoundException('Set up the Vault first.');
     }
+
+    if (user.vaultLockedUntil && user.vaultLockedUntil > new Date()) {
+      throw new UnauthorizedException({
+        code: 'VAULT_LOCKED',
+        message: 'Too many attempts. Try again shortly.',
+        details: {
+          attemptsRemaining: 0,
+          lockedUntil: user.vaultLockedUntil.toISOString(),
+        },
+      });
+    }
+
     const matches = await argon2.verify(user.vaultPasswordHash, input.password);
     if (!matches) {
-      throw new UnauthorizedException('Incorrect Vault password');
+      throw await this.registerFailedUnlock(user);
     }
+
+    // Clear the counter only when it's actually dirty, so a normal unlock
+    // stays a pure read.
+    if (user.vaultFailedAttempts > 0 || user.vaultLockedUntil) {
+      await this.db
+        .update(users)
+        .set({ vaultFailedAttempts: 0, vaultLockedUntil: null })
+        .where(eq(users.id, userId));
+    }
+
     return this.issueVaultSession(userId);
+  }
+
+  /** Bumps the counter, locks out at the threshold, and builds the error the screen renders. */
+  private async registerFailedUnlock(
+    user: typeof users.$inferSelect,
+  ): Promise<UnauthorizedException> {
+    const attempts = user.vaultFailedAttempts + 1;
+    const lockedOut = attempts >= env.VAULT_LOCKOUT_MAX_ATTEMPTS;
+    const lockedUntil = lockedOut
+      ? new Date(Date.now() + env.VAULT_LOCKOUT_MINUTES * 60_000)
+      : null;
+
+    await this.db
+      .update(users)
+      // Reset to 0 on lockout, same as the sign-in path: vaultLockedUntil
+      // is what gates access from here, and leaving the counter at the
+      // threshold would re-lock instantly on the first attempt afterward.
+      .set({
+        vaultFailedAttempts: lockedOut ? 0 : attempts,
+        vaultLockedUntil: lockedUntil ?? user.vaultLockedUntil,
+      })
+      .where(eq(users.id, user.id));
+
+    return new UnauthorizedException({
+      code: lockedOut ? 'VAULT_LOCKED' : 'VAULT_WRONG_PASSWORD',
+      message: lockedOut
+        ? 'Too many attempts. Try again shortly.'
+        : 'Incorrect passcode',
+      details: {
+        attemptsRemaining: lockedOut
+          ? 0
+          : env.VAULT_LOCKOUT_MAX_ATTEMPTS - attempts,
+        lockedUntil: lockedUntil ? lockedUntil.toISOString() : null,
+      },
+    });
   }
 
   /**
@@ -101,7 +166,16 @@ export class VaultService {
     const now = new Date();
     await this.db
       .update(users)
-      .set({ vaultPasswordHash, vaultSessionsInvalidatedAt: now })
+      // Clears any active lockout too: recovery already proved account
+      // ownership, which is a strictly stronger check than the passcode the
+      // lockout was protecting — leaving it set would lock someone out of a
+      // vault they just re-established control of.
+      .set({
+        vaultPasswordHash,
+        vaultSessionsInvalidatedAt: now,
+        vaultFailedAttempts: 0,
+        vaultLockedUntil: null,
+      })
       .where(eq(users.id, userId));
 
     return this.issueVaultSession(userId);

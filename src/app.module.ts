@@ -16,8 +16,10 @@ import { JourneysModule } from './modules/journeys/journeys.module';
 import { MediaModule } from './modules/media/media.module';
 import { MilestonesModule } from './modules/milestones/milestones.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
+import { SearchModule } from './modules/search/search.module';
 import { UsersModule } from './modules/users/users.module';
 import { VaultModule } from './modules/vault/vault.module';
+import { ViewsModule } from './modules/views/views.module';
 import { GlobalExceptionFilter } from './shared/filters/global-exception.filter';
 import { JwtAuthGuard } from './shared/guards/jwt-auth.guard';
 import { ResponseInterceptor } from './shared/interceptors/response.interceptor';
@@ -37,7 +39,10 @@ import { SharedModule } from './shared/shared.module';
                 target: 'pino-pretty',
                 // Only the message line (method + path + status) — the full
                 // req/res objects (headers, IP, etc.) are noise for local dev.
-                options: { singleLine: true, ignore: 'pid,hostname,req,res,context,responseTime' },
+                options: {
+                  singleLine: true,
+                  ignore: 'pid,hostname,req,res,context,responseTime',
+                },
               }
             : undefined,
         autoLogging: true,
@@ -47,8 +52,10 @@ import { SharedModule } from './shared/shared.module';
           req: (req) => ({ method: req.method, url: req.url }),
           res: (res) => ({ statusCode: res.statusCode }),
         },
-        customSuccessMessage: (req, res) => `${req.method} ${req.url} -> ${res.statusCode}`,
-        customErrorMessage: (req, res, err) => `${req.method} ${req.url} -> ${res.statusCode} (${err.message})`,
+        customSuccessMessage: (req, res) =>
+          `${req.method} ${req.url} -> ${res.statusCode}`,
+        customErrorMessage: (req, res, err) =>
+          `${req.method} ${req.url} -> ${res.statusCode} (${err.message})`,
       },
     }),
     ThrottlerModule.forRoot([
@@ -66,8 +73,10 @@ import { SharedModule } from './shared/shared.module';
     MediaModule,
     CommentsModule,
     ReactionsModule,
+    SearchModule,
     VaultModule,
     GiftsModule,
+    ViewsModule,
     HealthModule,
   ],
   providers: [

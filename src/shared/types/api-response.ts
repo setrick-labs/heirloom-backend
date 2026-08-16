@@ -9,6 +9,16 @@ export interface ApiErrorResponse {
   error: {
     code: string;
     message: string;
+    /**
+     * Structured, machine-readable specifics for errors a screen has to
+     * render numerically rather than just display. Currently the Vault
+     * unlock lockout (flow Screen 46 shows "2 attempts left" and "try again
+     * in 1 minute"), which can't be reconstructed from a message string.
+     *
+     * Opt-in: a thrown exception only populates this if it includes a
+     * `details` key, so ordinary errors keep the plain two-field shape.
+     */
+    details?: Record<string, unknown>;
   };
 }
 

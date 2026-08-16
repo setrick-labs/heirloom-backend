@@ -6,6 +6,12 @@
  * comments, reactions, gifts in every status, a couple of vault items, and
  * a couple of private aliases.
  *
+ * Also covers the data the 48-screen flow needs to be reviewable at all:
+ * per-family public nicknames on some members but not others (so Screen
+ * 34's three name states all appear), journey cover photos (Screen 17),
+ * 'version' reply comments (Screen 31), and deliberately stale read
+ * watermarks so unread badges (Screens 17/20) are non-zero.
+ *
  * Refuses to run against a non-empty database (see `assertEmpty` below) —
  * run `pnpm run db:wipe` first if you want a clean slate.
  *
@@ -30,6 +36,7 @@ import {
   comments,
   gifts,
   vaultItems,
+  contentViews,
 } from '../src/database/schema';
 import { MediaProcessingService } from '../src/modules/media/media-processing.service';
 import { StorageKeys } from '../src/shared/services/storage-keys.util';
@@ -237,6 +244,14 @@ interface UserPlan {
   email: string;
   role: 'owner' | 'admin' | 'member';
   bio?: string;
+  /**
+   * The name this person chose for their family to see (flow Screen 14).
+   * Deliberately set on only SOME members: Screen 34 renders three distinct
+   * cases side by side — your own row, someone using their own nickname,
+   * and someone you've privately renamed — and all three need to exist in
+   * seed data for that screen to be reviewable at all.
+   */
+  nickname?: string;
 }
 
 interface JourneyPlan {
@@ -274,11 +289,13 @@ const FAMILY_PLANS: FamilyPlan[] = [
         name: 'Elena Reyes',
         email: 'elena.reyes@heirloom.test',
         role: 'member',
+        nickname: 'Tía Elena',
       },
       {
         name: 'Diego Alvarez',
         email: 'diego.alvarez@heirloom.test',
         role: 'member',
+        nickname: 'Dieguito',
       },
     ],
     journeys: [
@@ -328,6 +345,7 @@ const FAMILY_PLANS: FamilyPlan[] = [
         name: 'Amara Okafor',
         email: 'amara.okafor@heirloom.test',
         role: 'member',
+        nickname: 'Ama',
       },
     ],
     journeys: [
@@ -373,8 +391,14 @@ const FAMILY_PLANS: FamilyPlan[] = [
         name: 'Priya Patel',
         email: 'priya.patel@heirloom.test',
         role: 'member',
+        nickname: 'Pri',
       },
-      { name: 'Raj Patel', email: 'raj.patel@heirloom.test', role: 'member' },
+      {
+        name: 'Raj Patel',
+        email: 'raj.patel@heirloom.test',
+        role: 'member',
+        nickname: 'Raj Mama',
+      },
       { name: 'Mina Kim', email: 'mina.kim@heirloom.test', role: 'member' },
     ],
     journeys: [
@@ -452,7 +476,12 @@ async function main() {
   for (const familyPlan of FAMILY_PLANS) {
     console.log(`\n=== ${familyPlan.name} ===`);
 
-    const createdMembers: { id: string; name: string; role: string }[] = [];
+    const createdMembers: {
+      id: string;
+      name: string;
+      role: string;
+      nickname?: string;
+    }[] = [];
     for (const memberPlan of familyPlan.members) {
       const [user] = await db
         .insert(users)
@@ -469,6 +498,7 @@ async function main() {
         id: user.id,
         name: user.name,
         role: memberPlan.role,
+        nickname: memberPlan.nickname,
       });
       userCount++;
       console.log(`  ✓ User: ${user.name} (${memberPlan.email})`);
@@ -487,6 +517,7 @@ async function main() {
         familyId: family.id,
         userId: member.id,
         role: member.role as 'owner' | 'admin' | 'member',
+        nickname: member.nickname,
       });
     }
     for (const member of createdMembers) {
@@ -568,6 +599,12 @@ async function main() {
         `  ✓ Journey: ${journey.title} (${journeyPlan.milestoneCount} milestones)`,
       );
 
+      // Screen 17's Journey cards are cover-photo-led, so every seeded
+      // journey needs one. Reusing the first Memory uploaded into it avoids
+      // a second upload round trip per journey for an image that would look
+      // identical anyway.
+      let journeyCoverKey: string | null = null;
+
       for (let m = 0; m < journeyPlan.milestoneCount; m++) {
         const theme = nextTheme();
         const milestoneId = randomUUID();
@@ -630,6 +667,7 @@ async function main() {
             })
             .returning();
           mediaIds.push(mediaRow.id);
+          journeyCoverKey ??= key;
           photoCount++;
 
           // Sequential, not fire-and-forget — this is an offline batch job,
@@ -674,7 +712,49 @@ async function main() {
           });
           commentCount++;
         }
+
+        // "Add your version" (flow Screen 31) — a threaded reply that
+        // carries its own photo of the same moment, stored as a
+        // comment_type of 'version' rather than its own grid tile. Only
+        // possible on a milestone that got two photos, since the second one
+        // becomes the version's media.
+        if (mediaIds.length >= 2 && reactors.length > 0) {
+          await db.insert(comments).values({
+            targetType: 'media',
+            targetId: mediaIds[0],
+            authorId: pick(reactors).id,
+            type: 'version',
+            mediaId: mediaIds[1],
+            body: pick([
+              'Mine came out completely different.',
+              'Here’s the same moment from my side.',
+              'I got the shot right after this one.',
+            ]),
+          });
+          commentCount++;
+        }
       }
+
+      // Cover photo, now that the first Memory has been uploaded.
+      if (journeyCoverKey) {
+        await db
+          .update(journeys)
+          .set({ coverStorageKey: journeyCoverKey })
+          .where(eq(journeys.id, journey.id));
+      }
+
+      // Read state (flow Screens 17/20): the owner has "seen" this journey
+      // as of 30 days ago, so anything newer still badges as unread —
+      // deliberately a stale watermark rather than `now`, since a seed where
+      // every badge reads zero makes the unread UI impossible to review.
+      // Other members get no watermark at all, which is the never-opened
+      // case and should badge everything.
+      await db.insert(contentViews).values({
+        userId: owner.id,
+        targetType: 'journey',
+        targetId: journey.id,
+        lastSeenAt: new Date(Date.now() - 30 * DAY_MS),
+      });
     }
   }
 

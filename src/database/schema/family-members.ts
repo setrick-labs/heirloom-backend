@@ -1,4 +1,4 @@
-import { pgTable, uuid, timestamp, unique } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, timestamp, unique } from 'drizzle-orm/pg-core';
 
 import { familyRoleEnum } from './enums';
 import { families } from './families';
@@ -15,6 +15,20 @@ export const familyMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     role: familyRoleEnum('role').notNull().default('member'),
+    /**
+     * The name this member chose for THIS family to see them by ("Set Your
+     * Nickname", flow Screen 14) — public within the family, and only the
+     * member themselves can change it (Screen 34: their own row reads
+     * "Edit · this is how everyone sees you").
+     *
+     * Deliberately NOT the same thing as an `aliases` row, which is the
+     * private, per-viewer rename from Screen 35. Both can exist for one
+     * person at once and they answer different questions; see
+     * shared/utils/display-name.util.ts for the resolution order.
+     *
+     * Null means "never set one" — fall back to users.name.
+     */
+    nickname: varchar('nickname', { length: 120 }),
     joinedAt: timestamp('joined_at', { withTimezone: true })
       .defaultNow()
       .notNull(),

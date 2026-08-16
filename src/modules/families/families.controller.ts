@@ -22,14 +22,16 @@ import {
 import {
   type SetAliasInput,
   setAliasInputSchema,
+  type SetOwnNicknameInput,
+  setOwnNicknameInputSchema,
 } from './validations/family-member.schema';
 import {
   type CreateFamilyInput,
   createFamilyInputSchema,
   type DeleteFamilyInput,
   deleteFamilyInputSchema,
-  type RenameFamilyInput,
-  renameFamilyInputSchema,
+  type UpdateFamilyInput,
+  updateFamilyInputSchema,
 } from './validations/family.schema';
 
 @Controller('families')
@@ -58,18 +60,14 @@ export class FamiliesController {
 
   /** Section 8: admin-only. */
   @Patch(':id')
-  async rename(
+  async update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
-    @Body(new ZodValidationPipe(renameFamilyInputSchema))
-    body: RenameFamilyInput,
+    @Body(new ZodValidationPipe(updateFamilyInputSchema))
+    body: UpdateFamilyInput,
   ) {
-    const family = await this.familiesService.renameFamily(
-      user.id,
-      id,
-      body.name,
-    );
-    return apiResponse(family, 'Family renamed');
+    const family = await this.familiesService.updateFamily(user.id, id, body);
+    return apiResponse(family, 'Family updated');
   }
 
   /** Section 7: admin-only, soft-delete with a grace period. `confirmName` must match exactly. */
@@ -105,6 +103,22 @@ export class FamiliesController {
   @Get(':id/members')
   getMembers(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.familiesService.getMembers(user.id, id);
+  }
+
+  /**
+   * Screen 14 / Screen 34's own-row "Edit" — public within the family.
+   * Hardcoded `me` rather than a :userId, so there is no shape of this
+   * request that sets somebody else's public name.
+   */
+  @Patch(':id/members/me/nickname')
+  async setOwnNickname(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(setOwnNicknameInputSchema))
+    body: SetOwnNicknameInput,
+  ) {
+    await this.familiesService.setOwnNickname(user.id, id, body.nickname);
+    return apiResponse('Nickname saved');
   }
 
   /** Section 2: private, per-viewer. */

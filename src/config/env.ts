@@ -112,6 +112,13 @@ export const envSchema = z.object({
   VAULT_SESSION_TTL_MINUTES: z.coerce.number().int().positive().default(10),
   LOGIN_LOCKOUT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   LOGIN_LOCKOUT_MINUTES: z.coerce.number().int().positive().default(15),
+  // Vault unlock throttling, separate from the sign-in numbers above:
+  // flow Screen 46 shows "2 attempts left" and a short "try again in 1
+  // minute" lockout, which is a tighter, more forgiving loop than an
+  // account lockout — a wrong passcode on your own phone is usually a
+  // typo, and it must never lock you out of the whole account.
+  VAULT_LOCKOUT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  VAULT_LOCKOUT_MINUTES: z.coerce.number().int().positive().default(1),
 
   // Base URL used to build shareable family-invite links, e.g.
   // "https://heirloom.app/join" -> "https://heirloom.app/join?code=123456".

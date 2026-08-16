@@ -13,3 +13,4 @@ export * from './comments';
 export * from './reactions';
 export * from './vault-items';
 export * from './gifts';
+export * from './content-views';

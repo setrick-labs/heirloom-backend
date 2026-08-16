@@ -22,8 +22,8 @@ import {
   addJourneyMembersInputSchema,
   type CreateJourneyInput,
   createJourneyInputSchema,
-  type RenameJourneyInput,
-  renameJourneyInputSchema,
+  type UpdateJourneyInput,
+  updateJourneyInputSchema,
   type SetVisibilityInput,
   setVisibilityInputSchema,
 } from './validations/journey.schema';
@@ -57,14 +57,14 @@ export class JourneysController {
 
   /** Owner-only. */
   @Patch(':id')
-  async rename(
+  async update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
-    @Body(new ZodValidationPipe(renameJourneyInputSchema))
-    body: RenameJourneyInput,
+    @Body(new ZodValidationPipe(updateJourneyInputSchema))
+    body: UpdateJourneyInput,
   ) {
-    const journey = await this.journeysService.rename(user.id, id, body);
-    return apiResponse(journey, 'Journey renamed');
+    const journey = await this.journeysService.update(user.id, id, body);
+    return apiResponse(journey, 'Journey updated');
   }
 
   /** Section 3: owner-only. Switching to 'selected' always carries the full member list. */

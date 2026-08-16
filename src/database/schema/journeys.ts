@@ -21,7 +21,14 @@ export const journeys = pgTable(
       .references(() => families.id, { onDelete: 'cascade' }),
     title: varchar('title', { length: 120 }).notNull(),
     description: varchar('description', { length: 1000 }),
+    // An externally-hosted cover URL, if one was ever set directly.
+    // Prefer coverStorageKey below for anything uploaded through the app.
     coverImageUrl: text('cover_image_url'),
+    // R2 object key for a cover uploaded via the app (Screen 19's "add a
+    // cover photo"). A key, not a URL, for the same reason media.storageKey
+    // is: the served URL is presigned and expires, so it has to be resolved
+    // fresh on every read rather than persisted.
+    coverStorageKey: text('cover_storage_key'),
     startDate: timestamp('start_date', { withTimezone: true }),
     endDate: timestamp('end_date', { withTimezone: true }),
     visibilityType: journeyVisibilityEnum('visibility_type')

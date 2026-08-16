@@ -17,6 +17,7 @@ import {
   reactions,
 } from '../../database/schema';
 import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
+import { getUnreadCountsByMilestone } from '../../shared/utils/unread-counts.util';
 import { MediaProcessingService } from '../media/media-processing.service';
 import {
   CreateMilestoneInput,
@@ -26,6 +27,19 @@ import {
 
 type MilestoneRow = typeof milestones.$inferSelect;
 type JourneyRow = typeof journeys.$inferSelect;
+
+/**
+ * Milestone counts the flow renders as literal copy on Screen 24's header
+ * ("12 memories · 3 contributors") and as the grid's unread badge. Kept
+ * separate from the positional params above because these two are the ones
+ * that get added to over time.
+ */
+interface MilestoneComputedFields {
+  /** Distinct people who have contributed a Memory here. */
+  contributorCount: number;
+  /** Memories from other people since this viewer last opened this milestone. */
+  unreadCount: number;
+}
 
 @Injectable()
 export class MilestonesService {
@@ -213,6 +227,22 @@ export class MilestonesService {
       pushActivity(mediaIdToMilestoneId.get(r.targetId), r.createdAt);
     }
 
+    // "12 memories · 3 contributors" (Screen 24) — derived from mediaRows,
+    // which is already loaded above, rather than a second grouped query.
+    const contributorsByMilestoneId = new Map<string, Set<string>>();
+    for (const m of mediaRows) {
+      if (!m.milestoneId) continue;
+      const set = contributorsByMilestoneId.get(m.milestoneId);
+      if (set) set.add(m.ownerId);
+      else contributorsByMilestoneId.set(m.milestoneId, new Set([m.ownerId]));
+    }
+
+    const unreadByMilestoneId = await getUnreadCountsByMilestone(
+      this.db,
+      userId,
+      milestoneIds,
+    );
+
     return rows.map((row) => {
       const timestamps = [
         ...(activityTimestampsByMilestoneId.get(row.id) ?? []),
@@ -228,6 +258,10 @@ export class MilestonesService {
         mediaIdsByMilestoneId.get(row.id) ?? [],
         reactionCountByMilestoneId.get(row.id) ?? 0,
         lastOtherActivityAt,
+        {
+          contributorCount: contributorsByMilestoneId.get(row.id)?.size ?? 0,
+          unreadCount: unreadByMilestoneId.get(row.id) ?? 0,
+        },
       );
     });
   }
@@ -403,6 +437,12 @@ export class MilestonesService {
       ? new Date(Math.max(...activityTimestamps.map((d) => d.getTime())))
       : null;
 
+    const unreadByMilestoneId = await getUnreadCountsByMilestone(
+      this.db,
+      viewerId,
+      [row.id],
+    );
+
     return this.toDto(
       viewerId,
       row,
@@ -410,6 +450,10 @@ export class MilestonesService {
       mediaIds,
       reactionCount,
       lastOtherActivityAt,
+      {
+        contributorCount: new Set(mediaRows.map((m) => m.ownerId)).size,
+        unreadCount: unreadByMilestoneId.get(row.id) ?? 0,
+      },
     );
   }
 
@@ -420,6 +464,7 @@ export class MilestonesService {
     mediaIds: string[],
     reactionCount: number,
     lastOtherActivityAt: Date | null,
+    computed: MilestoneComputedFields,
   ): Milestone {
     const deletedAt = row.deletedAt;
     return {
@@ -431,6 +476,9 @@ export class MilestonesService {
       location: row.location,
       mediaIds,
       reactionCount,
+      memoryCount: mediaIds.length,
+      contributorCount: computed.contributorCount,
+      unreadCount: computed.unreadCount,
       lastOtherActivityAt: lastOtherActivityAt
         ? lastOtherActivityAt.toISOString()
         : null,

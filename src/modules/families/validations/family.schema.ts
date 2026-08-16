@@ -35,10 +35,23 @@ export const createFamilyInputSchema = familySchema.pick({
 });
 export type CreateFamilyInput = z.infer<typeof createFamilyInputSchema>;
 
-export const renameFamilyInputSchema = z.object({
-  name: z.string().min(1).max(120),
-});
-export type RenameFamilyInput = z.infer<typeof renameFamilyInputSchema>;
+/**
+ * Screen 12 submits a name and, optionally, a cover photo that was already
+ * uploaded via POST /media/cover-upload-url — hence a storage key rather
+ * than a URL (see families.coverStorageKey). Both fields are optional so
+ * the same endpoint covers "rename only" and "set cover only"; `null`
+ * clears an existing cover, which is why it isn't just `.optional()`.
+ */
+export const updateFamilyInputSchema = z
+  .object({
+    name: z.string().min(1).max(120).optional(),
+    coverStorageKey: z.string().min(1).nullable().optional(),
+  })
+  .refine(
+    (value) => value.name !== undefined || value.coverStorageKey !== undefined,
+    { message: 'Provide a name or a cover photo to update' },
+  );
+export type UpdateFamilyInput = z.infer<typeof updateFamilyInputSchema>;
 
 /** Spec: "typing the family's name to confirm" — checked server-side too, not just a client UX gate. */
 export const deleteFamilyInputSchema = z.object({

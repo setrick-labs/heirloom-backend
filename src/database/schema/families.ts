@@ -7,7 +7,9 @@ export const families = pgTable('families', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: varchar('name', { length: 120 }).notNull(),
   description: varchar('description', { length: 500 }),
+  // See journeys.coverImageUrl/coverStorageKey — same split, same reason.
   coverImageUrl: text('cover_image_url'),
+  coverStorageKey: text('cover_storage_key'),
   ownerId: uuid('owner_id')
     .notNull()
     .references(() => users.id, { onDelete: 'restrict' }),

@@ -22,6 +22,8 @@ export const mediaSchema = z.object({
   height: z.number().int().positive().nullable().optional(),
   durationSeconds: z.number().positive().nullable().optional(),
   sizeBytes: z.number().int().positive().nullable().optional(),
+  /** Backs Screen 24's `💬 4` pill — the only pre-open signal a tile has a discussion. */
+  commentCount: z.number().int().min(0).default(0),
   createdAt: isoDateTimeSchema,
 });
 export type Media = z.infer<typeof mediaSchema>;
@@ -50,3 +52,24 @@ export const requestUploadUrlInputSchema = z.object({
   sizeBytes: z.number().int().positive(),
 });
 export type RequestUploadUrlInput = z.infer<typeof requestUploadUrlInputSchema>;
+
+/**
+ * Cover photos for a Family (Screen 12) or a Journey (Screen 19). Separate
+ * from requestUploadUrlInputSchema because a cover belongs to no milestone
+ * and so can't satisfy that schema's journeyId/milestoneId requirements.
+ *
+ * `targetId` may name a row that doesn't exist yet — both screens let you
+ * pick the photo before submitting the form that creates the thing — so
+ * this only namespaces a storage key; it is never a row lookup. The
+ * returned key is bound to the real row afterwards, by the create/update
+ * call that accepts `coverStorageKey`.
+ */
+export const requestCoverUploadUrlInputSchema = z.object({
+  scope: z.enum(['family', 'journey']),
+  targetId: idSchema,
+  contentType: z.string().min(1),
+  sizeBytes: z.number().int().positive(),
+});
+export type RequestCoverUploadUrlInput = z.infer<
+  typeof requestCoverUploadUrlInputSchema
+>;

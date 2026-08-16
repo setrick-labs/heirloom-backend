@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, count, desc, eq, inArray, isNull, max } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, max, ne } from 'drizzle-orm';
 
 import { env } from '../../config/env';
 import { DATABASE_CONNECTION } from '../../database/database.module';
@@ -12,33 +12,62 @@ import type { Database } from '../../database/connection';
 import {
   aliases,
   familyMembers,
+  gifts,
   journeyMembers,
   journeys,
+  media,
   milestones,
   users,
 } from '../../database/schema';
+import { StorageService } from '../../shared/services/storage.service';
+import { resolveCoverImageUrl } from '../../shared/utils/cover-url.util';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
 import {
   requireJourneyAccess,
   requireJourneyOwner,
 } from '../../shared/utils/journey-access.util';
+import { getUnreadCountsByJourney } from '../../shared/utils/unread-counts.util';
 import { GiftsService } from '../gifts/gifts.service';
 import type { JourneyMemberView } from './validations/journey-member.schema';
 import {
   AddJourneyMembersInput,
   CreateJourneyInput,
   Journey,
-  RenameJourneyInput,
+  UpdateJourneyInput,
   SetVisibilityInput,
 } from './validations/journey.schema';
 
 type JourneyRow = typeof journeys.$inferSelect;
+
+/**
+ * Everything on a Journey DTO that isn't a column. Grouped into one object
+ * rather than added as positional params to toDto — the flow's Home and
+ * Journey Detail headers read four of these as literal copy ("6 places ·
+ * updated 2 days ago", "4 can see this", the unread badge, the gift
+ * marker), so this list grows, and positionally-passed counts are exactly
+ * the kind of thing that silently swaps.
+ */
+interface JourneyComputedFields {
+  milestoneCount: number;
+  /** Total Memories across the journey — drives Screen 48's every-10th celebration. */
+  memoryCount: number;
+  /** "4 can see this" — everyone with visibility, owner always included. */
+  memberCount: number;
+  /** Unseen Memories by other people since this viewer's last visit (Screen 17's cover badge). */
+  unreadCount: number;
+  /** A scheduled, uncancelled gift exists for this journey (Screen 38's gift icon). */
+  giftScheduled: boolean;
+  /** Presigned fresh from coverStorageKey, or the plain coverImageUrl column. */
+  coverImageUrl: string | null;
+  lastActivityAt: Date;
+}
 
 @Injectable()
 export class JourneysService {
   constructor(
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly giftsService: GiftsService,
+    private readonly storageService: StorageService,
   ) {}
 
   async create(userId: string, input: CreateJourneyInput): Promise<Journey> {
@@ -57,6 +86,7 @@ export class JourneysService {
           title: input.title,
           description: input.description,
           visibilityType: input.visibilityType,
+          coverStorageKey: input.coverStorageKey,
           startDate: input.startDate ? new Date(input.startDate) : undefined,
           endDate: input.endDate ? new Date(input.endDate) : undefined,
           createdBy: userId,
@@ -109,9 +139,19 @@ export class JourneysService {
     );
 
     // Batched instead of one count + one max(createdAt) query per journey
-    // (was N+1 — a 10-journey family meant 20 extra round trips here).
+    // (was N+1 — a 10-journey family meant 20 extra round trips here). The
+    // memory/member/gift/unread aggregates added for the flow's Home cards
+    // follow the same rule: one grouped query each, never per-journey.
     const visibleIds = visible.map((row) => row.id);
-    const [counts, latestActivity] = visibleIds.length
+    const [
+      counts,
+      latestActivity,
+      memoryCounts,
+      selectedMemberCounts,
+      familyMemberCount,
+      giftedIds,
+      unreadByJourneyId,
+    ] = visibleIds.length
       ? await Promise.all([
           this.db
             .select({ journeyId: milestones.journeyId, value: count() })
@@ -136,13 +176,77 @@ export class JourneysService {
               ),
             )
             .groupBy(milestones.journeyId),
+          this.db
+            .select({ journeyId: milestones.journeyId, value: count() })
+            .from(media)
+            .innerJoin(milestones, eq(media.milestoneId, milestones.id))
+            .where(
+              and(
+                inArray(milestones.journeyId, visibleIds),
+                isNull(milestones.deletedAt),
+              ),
+            )
+            .groupBy(milestones.journeyId),
+          // Excludes the creator so countViewers can add them back
+          // unconditionally: createJourney inserts memberUserIds verbatim,
+          // and the client's picker pre-selects "you" (Screen 19), so the
+          // owner is sometimes already a journey_members row and sometimes
+          // not. Counting non-owners is the only stable base.
+          this.db
+            .select({ journeyId: journeyMembers.journeyId, value: count() })
+            .from(journeyMembers)
+            .innerJoin(journeys, eq(journeys.id, journeyMembers.journeyId))
+            .where(
+              and(
+                inArray(journeyMembers.journeyId, visibleIds),
+                ne(journeyMembers.userId, journeys.createdBy),
+              ),
+            )
+            .groupBy(journeyMembers.journeyId),
+          this.db
+            .select({ value: count() })
+            .from(familyMembers)
+            .where(eq(familyMembers.familyId, familyId)),
+          this.db
+            .select({ journeyId: gifts.journeyId })
+            .from(gifts)
+            .where(
+              and(
+                inArray(gifts.journeyId, visibleIds),
+                isNull(gifts.cancelledAt),
+              ),
+            ),
+          getUnreadCountsByJourney(this.db, userId, visibleIds),
         ])
-      : [[], []];
+      : [[], [], [], [], [{ value: 0 }], [], new Map<string, number>()];
+
     const countByJourneyId = new Map(
       counts.map((row) => [row.journeyId, row.value]),
     );
     const latestByJourneyId = new Map(
       latestActivity.map((row) => [row.journeyId, row.latest]),
+    );
+    const memoryCountByJourneyId = new Map(
+      memoryCounts.map((row) => [row.journeyId, row.value]),
+    );
+    const selectedMemberCountByJourneyId = new Map(
+      selectedMemberCounts.map((row) => [row.journeyId, row.value]),
+    );
+    const giftedJourneyIds = new Set(giftedIds.map((row) => row.journeyId));
+    const totalFamilyMembers = familyMemberCount[0]?.value ?? 0;
+
+    // Presigning is a per-row async call, so it happens once here rather
+    // than inside the synchronous map below.
+    const coverUrls = new Map(
+      await Promise.all(
+        visible.map(
+          async (row) =>
+            [
+              row.id,
+              await resolveCoverImageUrl(this.storageService, row),
+            ] as const,
+        ),
+      ),
     );
 
     const dtos = visible.map((row) => {
@@ -151,18 +255,42 @@ export class JourneysService {
         latestMilestoneAt && latestMilestoneAt > row.updatedAt
           ? latestMilestoneAt
           : row.updatedAt;
-      return this.toDto(
-        userId,
-        row,
-        countByJourneyId.get(row.id) ?? 0,
+      return this.toDto(userId, row, {
+        milestoneCount: countByJourneyId.get(row.id) ?? 0,
+        memoryCount: memoryCountByJourneyId.get(row.id) ?? 0,
+        memberCount: this.countViewers(
+          row,
+          selectedMemberCountByJourneyId.get(row.id) ?? 0,
+          totalFamilyMembers,
+        ),
+        unreadCount: unreadByJourneyId.get(row.id) ?? 0,
+        giftScheduled: giftedJourneyIds.has(row.id),
+        coverImageUrl: coverUrls.get(row.id) ?? null,
         lastActivityAt,
-      );
+      });
     });
     return dtos.sort(
       (a, b) =>
         new Date(b.lastActivityAt).getTime() -
         new Date(a.lastActivityAt).getTime(),
     );
+  }
+
+  /**
+   * "4 can see this" (Screens 19/20). An 'all' journey is visible to the
+   * whole family, so that count is just the roster. A 'selected' journey is
+   * its non-owner member count plus the owner, who always retains
+   * visibility whether or not a journey_members row exists for them.
+   */
+  private countViewers(
+    row: JourneyRow,
+    nonOwnerMemberCount: number,
+    totalFamilyMembers: number,
+  ): number {
+    if (row.visibilityType === 'all') {
+      return totalFamilyMembers;
+    }
+    return nonOwnerMemberCount + 1;
   }
 
   async findById(userId: string, journeyId: string): Promise<Journey> {
@@ -177,15 +305,21 @@ export class JourneysService {
   }
 
   /** Section 4: owner-only. */
-  async rename(
+  async update(
     userId: string,
     journeyId: string,
-    input: RenameJourneyInput,
+    input: UpdateJourneyInput,
   ): Promise<Journey> {
     await requireJourneyOwner(this.db, userId, journeyId);
     const [updated] = await this.db
       .update(journeys)
-      .set({ title: input.title, updatedAt: new Date() })
+      .set({
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.coverStorageKey !== undefined
+          ? { coverStorageKey: input.coverStorageKey }
+          : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(journeys.id, journeyId))
       .returning();
     return this.withComputedFields(userId, updated);
@@ -410,35 +544,81 @@ export class JourneysService {
     userId: string,
     row: JourneyRow,
   ): Promise<Journey> {
-    const [{ value: milestoneCount }] = await this.db
-      .select({ value: count() })
-      .from(milestones)
-      .where(
-        and(eq(milestones.journeyId, row.id), isNull(milestones.deletedAt)),
-      );
-
-    const [latestMilestone] = await this.db
-      .select({ createdAt: milestones.createdAt })
-      .from(milestones)
-      .where(
-        and(eq(milestones.journeyId, row.id), isNull(milestones.deletedAt)),
-      )
-      .orderBy(desc(milestones.createdAt))
-      .limit(1);
+    const [
+      [{ value: milestoneCount }],
+      [latestMilestone],
+      [{ value: memoryCount }],
+      [{ value: nonOwnerMemberCount }],
+      [{ value: totalFamilyMembers }],
+      giftRows,
+      unreadByJourneyId,
+    ] = await Promise.all([
+      this.db
+        .select({ value: count() })
+        .from(milestones)
+        .where(
+          and(eq(milestones.journeyId, row.id), isNull(milestones.deletedAt)),
+        ),
+      this.db
+        .select({ createdAt: milestones.createdAt })
+        .from(milestones)
+        .where(
+          and(eq(milestones.journeyId, row.id), isNull(milestones.deletedAt)),
+        )
+        .orderBy(desc(milestones.createdAt))
+        .limit(1),
+      this.db
+        .select({ value: count() })
+        .from(media)
+        .innerJoin(milestones, eq(media.milestoneId, milestones.id))
+        .where(
+          and(eq(milestones.journeyId, row.id), isNull(milestones.deletedAt)),
+        ),
+      this.db
+        .select({ value: count() })
+        .from(journeyMembers)
+        .where(
+          and(
+            eq(journeyMembers.journeyId, row.id),
+            ne(journeyMembers.userId, row.createdBy),
+          ),
+        ),
+      this.db
+        .select({ value: count() })
+        .from(familyMembers)
+        .where(eq(familyMembers.familyId, row.familyId)),
+      this.db
+        .select({ journeyId: gifts.journeyId })
+        .from(gifts)
+        .where(and(eq(gifts.journeyId, row.id), isNull(gifts.cancelledAt)))
+        .limit(1),
+      getUnreadCountsByJourney(this.db, userId, [row.id]),
+    ]);
 
     const lastActivityAt =
       latestMilestone && latestMilestone.createdAt > row.updatedAt
         ? latestMilestone.createdAt
         : row.updatedAt;
 
-    return this.toDto(userId, row, milestoneCount, lastActivityAt);
+    return this.toDto(userId, row, {
+      milestoneCount,
+      memoryCount,
+      memberCount: this.countViewers(
+        row,
+        nonOwnerMemberCount,
+        totalFamilyMembers,
+      ),
+      unreadCount: unreadByJourneyId.get(row.id) ?? 0,
+      giftScheduled: giftRows.length > 0,
+      coverImageUrl: await resolveCoverImageUrl(this.storageService, row),
+      lastActivityAt,
+    });
   }
 
   private toDto(
     userId: string,
     row: JourneyRow,
-    milestoneCount: number,
-    lastActivityAt: Date,
+    computed: JourneyComputedFields,
   ): Journey {
     const deletedAt = row.deletedAt;
     return {
@@ -446,12 +626,16 @@ export class JourneysService {
       familyId: row.familyId,
       title: row.title,
       description: row.description,
-      coverImageUrl: row.coverImageUrl,
+      coverImageUrl: computed.coverImageUrl,
       startDate: row.startDate?.toISOString() ?? null,
       endDate: row.endDate?.toISOString() ?? null,
       visibilityType: row.visibilityType,
-      milestoneCount,
-      lastActivityAt: lastActivityAt.toISOString(),
+      milestoneCount: computed.milestoneCount,
+      memoryCount: computed.memoryCount,
+      memberCount: computed.memberCount,
+      unreadCount: computed.unreadCount,
+      giftScheduled: computed.giftScheduled,
+      lastActivityAt: computed.lastActivityAt.toISOString(),
       createdBy: row.createdBy,
       isOwner: row.createdBy === userId,
       createdAt: row.createdAt.toISOString(),
