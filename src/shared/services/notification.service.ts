@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import {
+  buildGiftInviteEmail,
+  buildGiftUnlockedEmail,
+} from './gift-email.template';
+
 /**
  * Stub notification sender — no email/SMS provider is wired up yet (no
  * SendGrid/Twilio/etc. keys exist in env.ts). Every method just logs what
@@ -30,15 +35,26 @@ export class NotificationService {
     return Promise.resolve();
   }
 
-  /** Gifting spec Section 5: reads as "someone has something for you," not a generic signup prompt. */
+  /**
+   * Screen 40 / Gifting spec Section 5: reads as "someone has something for
+   * you," not a generic signup prompt. Copy and CTA live in
+   * gift-email.template.ts, so wiring a real provider is a transport swap
+   * rather than a rewrite of the message.
+   */
   sendGiftInvite(
     recipientEmail: string,
     senderName: string,
     journeyTitle: string,
+    recipientName?: string | null,
   ): Promise<void> {
+    const email = buildGiftInviteEmail({
+      recipientEmail,
+      recipientName,
+      senderName,
+      journeyTitle,
+    });
     this.logger.warn(
-      `[stub email/sms] Gift invite for ${recipientEmail}: ${senderName} has gifted you ` +
-        `"${journeyTitle}" — sign up with this email to see it. ` +
+      `[stub email] To ${recipientEmail} — ${email.subject}\n${email.body}\n` +
         '(no provider configured — wire one up in NotificationService)',
     );
     return Promise.resolve();
@@ -50,9 +66,9 @@ export class NotificationService {
     senderName: string,
     journeyTitle: string,
   ): Promise<void> {
+    const email = buildGiftUnlockedEmail({ senderName, journeyTitle });
     this.logger.warn(
-      `[stub email/sms] Gift unlocked for ${recipientEmail}: ${senderName} has gifted you ` +
-        `"${journeyTitle}" — open Heirloom to see it. ` +
+      `[stub email] To ${recipientEmail} — ${email.subject}\n${email.body}\n` +
         '(no provider configured — wire one up in NotificationService)',
     );
     return Promise.resolve();
