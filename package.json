@@ -25,7 +25,8 @@
     "storage:verify": "tsx scripts/verify-storage.ts",
     "db:wipe": "tsx scripts/wipe-db.ts",
     "db:seed": "tsx scripts/seed-full-dataset.ts",
-    "media:retry-failed": "tsx scripts/retry-failed-media.ts"
+    "media:retry-failed": "tsx scripts/retry-failed-media.ts",
+    "media:verify-heic": "tsx scripts/verify-heic-pipeline.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1103.0",
