@@ -9,8 +9,20 @@ import {
   mediaTypeSchema,
 } from '../../media/validations/media.schema';
 
-// Same length rule as the account password (auth.schema.ts's signUpInputSchema).
-const vaultPasswordSchema = z.string().min(8).max(72);
+/**
+ * Deliberately NOT the account-password rule.
+ *
+ * The Vault is unlocked from a passcode pad on a phone you are already
+ * holding and already signed in on (Screens 33/46), so the threat it defends
+ * against is someone picking up an unlocked device — not an offline attack on
+ * a stolen hash. A 4-digit passcode is the right shape for that, and what
+ * makes it safe is the server-side lockout rather than the length: see
+ * VAULT_LOCKOUT_MAX_ATTEMPTS / VAULT_LOCKOUT_MINUTES, which were tuned for
+ * exactly this loop.
+ *
+ * Longer is still allowed, so a passphrase works for anyone who wants one.
+ */
+const vaultPasswordSchema = z.string().min(4).max(72);
 
 export const vaultStatusSchema = z.object({
   isSetUp: z.boolean(),
