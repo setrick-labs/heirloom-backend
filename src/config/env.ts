@@ -120,6 +120,22 @@ export const envSchema = z.object({
   VAULT_LOCKOUT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   VAULT_LOCKOUT_MINUTES: z.coerce.number().int().positive().default(1),
 
+  // Outbound email (SMTP). Optional as a group: with SMTP_HOST unset the
+  // NotificationService logs what it would have sent instead of failing, so
+  // the whole auth flow stays testable locally without a mail provider.
+  // Deliberately plain SMTP rather than a vendor SDK — every provider
+  // (Resend, Postmark, SES, Mailgun, a self-hosted relay) speaks it, so
+  // switching is a config change rather than a code change.
+  SMTP_HOST: optionalString(z.string().min(1)),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_USER: optionalString(z.string().min(1)),
+  SMTP_PASSWORD: optionalString(z.string().min(1)),
+  // True for implicit TLS on port 465; false for STARTTLS on 587.
+  SMTP_SECURE: booleanString(false),
+  // The From: header. Must be an address the SMTP account is allowed to send
+  // as, or most providers will reject the message outright.
+  MAIL_FROM: optionalString(z.string().min(1)),
+
   // Base URL for links the app deep-links back into — gift invites
   // (Screen 40's "See Your Gift" CTA) build on this. Optional: without it
   // the email still explains the gift, it just can't offer a one-tap link.

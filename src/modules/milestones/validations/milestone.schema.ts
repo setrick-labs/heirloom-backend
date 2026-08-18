@@ -71,7 +71,24 @@ export const createMilestoneInputSchema = milestoneSchema
   });
 export type CreateMilestoneInput = z.infer<typeof createMilestoneInputSchema>;
 
-export const renameMilestoneInputSchema = z.object({
-  title: z.string().min(1).max(120),
-});
+/**
+ * Editing a stop (Screen 24's ••• > Edit Place). Every field optional so the
+ * same endpoint covers a rename, a date correction, or both — but at least
+ * one must be present, or the request is a no-op the client didn't mean.
+ *
+ * `description` and `location` are nullable rather than merely optional:
+ * `null` clears them, `undefined` leaves them alone. Omitting that
+ * distinction would make a cleared location indistinguishable from an
+ * untouched one.
+ */
+export const renameMilestoneInputSchema = z
+  .object({
+    title: z.string().min(1).max(120).optional(),
+    description: z.string().max(1000).nullable().optional(),
+    date: isoDateTimeSchema.optional(),
+    location: z.string().max(200).nullable().optional(),
+  })
+  .refine((value) => Object.values(value).some((field) => field !== undefined), {
+    message: 'Provide at least one field to update',
+  });
 export type RenameMilestoneInput = z.infer<typeof renameMilestoneInputSchema>;

@@ -290,9 +290,19 @@ export class MilestonesService {
     input: RenameMilestoneInput,
   ): Promise<Milestone> {
     const { milestone, journey } = await this.requireManage(userId, id);
+    // Spread only the keys actually present, so an omitted field is left
+    // alone while an explicit null still clears it.
     const [updated] = await this.db
       .update(milestones)
-      .set({ title: input.title, updatedAt: new Date() })
+      .set({
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.description !== undefined
+          ? { description: input.description }
+          : {}),
+        ...(input.date !== undefined ? { date: new Date(input.date) } : {}),
+        ...(input.location !== undefined ? { location: input.location } : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(milestones.id, milestone.id))
       .returning();
     return this.withComputedFields(userId, journey, updated);
