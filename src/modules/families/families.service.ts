@@ -78,7 +78,18 @@ export class FamiliesService {
       .innerJoin(families, eq(familyMembers.familyId, families.id))
       .where(and(eq(familyMembers.userId, userId), isNull(families.deletedAt)));
 
-    return Promise.all(rows.map((row) => this.withMemberCount(row.family)));
+    // One grouped count for the whole list, not withMemberCount() per row
+    // (was N+1). Same rule as journeys.listForFamily's aggregates and
+    // MediaService.countCommentsFor: a list endpoint issues a fixed number
+    // of queries regardless of how many rows it returns.
+    const memberCounts = await this.countMembersFor(
+      rows.map((row) => row.family.id),
+    );
+    return Promise.all(
+      rows.map((row) =>
+        this.toDto(row.family, memberCounts.get(row.family.id) ?? 0),
+      ),
+    );
   }
 
   async findById(id: string): Promise<Family> {
@@ -612,6 +623,7 @@ export class FamiliesService {
     };
   }
 
+  /** Single-row callers only — list paths must use countMembersFor instead. */
   private async withMemberCount(
     row: typeof families.$inferSelect,
   ): Promise<Family> {
@@ -620,6 +632,21 @@ export class FamiliesService {
       .from(familyMembers)
       .where(eq(familyMembers.familyId, row.id));
     return this.toDto(row, value);
+  }
+
+  /** One grouped query for a whole list's member counts, keyed by family id. */
+  private async countMembersFor(
+    familyIds: string[],
+  ): Promise<Map<string, number>> {
+    if (familyIds.length === 0) {
+      return new Map();
+    }
+    const rows = await this.db
+      .select({ familyId: familyMembers.familyId, value: count() })
+      .from(familyMembers)
+      .where(inArray(familyMembers.familyId, familyIds))
+      .groupBy(familyMembers.familyId);
+    return new Map(rows.map((row) => [row.familyId, row.value]));
   }
 
   private async toDto(

@@ -1,4 +1,11 @@
-import { pgTable, uuid, varchar, timestamp, unique } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  varchar,
+  timestamp,
+  index,
+  unique,
+} from 'drizzle-orm/pg-core';
 
 import { familyRoleEnum } from './enums';
 import { families } from './families';
@@ -38,6 +45,11 @@ export const familyMembers = pgTable(
       table.familyId,
       table.userId,
     ),
+    // The unique above leads with family_id, so it can't serve the
+    // user_id-only lookups on the hottest path in the app: "which families
+    // am I in" (families.listForUser, resolveActiveFamilyId), which runs on
+    // essentially every app open.
+    index('family_members_user_id_idx').on(table.userId),
   ],
 );
 

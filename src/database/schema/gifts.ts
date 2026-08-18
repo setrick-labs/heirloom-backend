@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, timestamp, index } from 'drizzle-orm/pg-core';
 
 import { timestamps } from './_helpers';
 import { journeys } from './journeys';
@@ -12,37 +12,51 @@ import { users } from './users';
  * passed, not because anything wrote to the row at that moment, and
  * deriving it avoids the row ever being stale relative to the clock.
  */
-export const gifts = pgTable('gifts', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  journeyId: uuid('journey_id')
-    .notNull()
-    .references(() => journeys.id, { onDelete: 'cascade' }),
-  fromUserId: uuid('from_user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  // Always present — the source of truth for matching a recipient, whether
-  // or not they have an account yet (Section 3/5).
-  recipientEmail: varchar('recipient_email', { length: 255 }).notNull(),
-  // Resolved lazily: at unlock-sweep time if an account already exists, or
-  // at account verification time if they sign up later (even years later —
-  // Section 3: "gifts never expire on the recipient's side").
-  toUserId: uuid('to_user_id').references(() => users.id, {
-    onDelete: 'set null',
-  }),
-  message: varchar('message', { length: 2000 }),
-  unlockDate: timestamp('unlock_date', { withTimezone: true }).notNull(),
-  // Set only via explicit sender cancellation (Section 8) or automatically
-  // if the underlying Journey is deleted while still pending (Section 7).
-  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
-  // Distinct from "unlocked" — Section 2: did they actually look, not just
-  // gain access. Set once, the first time the recipient opens the reveal.
-  firstOpenedAt: timestamp('first_opened_at', { withTimezone: true }),
-  // Tracks whether the unlock-sweep has already sent its one-time email, so
-  // a recurring sweep never re-sends (see gifts.service.ts's cron).
-  inviteSentAt: timestamp('invite_sent_at', { withTimezone: true }),
-  unlockNotifiedAt: timestamp('unlock_notified_at', { withTimezone: true }),
-  ...timestamps,
-});
+export const gifts = pgTable(
+  'gifts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    journeyId: uuid('journey_id')
+      .notNull()
+      .references(() => journeys.id, { onDelete: 'cascade' }),
+    fromUserId: uuid('from_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // Always present — the source of truth for matching a recipient, whether
+    // or not they have an account yet (Section 3/5).
+    recipientEmail: varchar('recipient_email', { length: 255 }).notNull(),
+    // Resolved lazily: at unlock-sweep time if an account already exists, or
+    // at account verification time if they sign up later (even years later —
+    // Section 3: "gifts never expire on the recipient's side").
+    toUserId: uuid('to_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    message: varchar('message', { length: 2000 }),
+    unlockDate: timestamp('unlock_date', { withTimezone: true }).notNull(),
+    // Set only via explicit sender cancellation (Section 8) or automatically
+    // if the underlying Journey is deleted while still pending (Section 7).
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    // Distinct from "unlocked" — Section 2: did they actually look, not just
+    // gain access. Set once, the first time the recipient opens the reveal.
+    firstOpenedAt: timestamp('first_opened_at', { withTimezone: true }),
+    // Tracks whether the unlock-sweep has already sent its one-time email, so
+    // a recurring sweep never re-sends (see gifts.service.ts's cron).
+    inviteSentAt: timestamp('invite_sent_at', { withTimezone: true }),
+    unlockNotifiedAt: timestamp('unlock_notified_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    // canAccessJourneyViaGift runs on every journey access check that
+    // family membership didn't already satisfy — this table had no indexes
+    // at all, so that was a sequential scan inside the hot auth path.
+    index('gifts_journey_id_idx').on(table.journeyId),
+    // "Gifts I received" / "gifts I sent" list endpoints.
+    index('gifts_to_user_id_idx').on(table.toUserId),
+    index('gifts_from_user_id_idx').on(table.fromUserId),
+    // claimPendingGifts matches unclaimed gifts by address at signup.
+    index('gifts_recipient_email_idx').on(table.recipientEmail),
+  ],
+);
 
 export type GiftRow = typeof gifts.$inferSelect;
 export type NewGiftRow = typeof gifts.$inferInsert;
