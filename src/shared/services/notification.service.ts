@@ -53,6 +53,7 @@ export class NotificationService {
       to: identifier,
       subject: email.subject,
       body: email.body,
+      logLabel: 'verification code',
     });
   }
 
@@ -73,6 +74,7 @@ export class NotificationService {
       to: identifier,
       subject: email.subject,
       body: email.body,
+      logLabel: 'password reset link',
     });
   }
 
@@ -96,6 +98,7 @@ export class NotificationService {
       to: recipientEmail,
       subject: email.subject,
       body: email.body,
+      logLabel: 'gift invite',
     });
   }
 
@@ -110,6 +113,7 @@ export class NotificationService {
       to: recipientEmail,
       subject: email.subject,
       body: email.body,
+      logLabel: 'gift unlocked notice',
     });
   }
 }

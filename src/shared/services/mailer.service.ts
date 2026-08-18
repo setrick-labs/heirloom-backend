@@ -7,6 +7,16 @@ export interface OutboundEmail {
   to: string;
   subject: string;
   body: string;
+  /**
+   * What to call this message in the logs.
+   *
+   * Needed because the subject is not safe to log: verification subjects
+   * carry the code itself ("120071 is your Heirloom code"), deliberately, so
+   * it shows in a phone's notification preview. Logging the subject would
+   * therefore write a live credential into every log aggregator the service
+   * ships to. Callers name the message instead.
+   */
+  logLabel: string;
 }
 
 /**
@@ -60,6 +70,9 @@ export class MailerService {
     const transporter = this.getTransporter();
 
     if (!transporter) {
+      // The full message, code and all, is intentional here: with no provider
+      // configured this log IS the delivery mechanism, and the flow has to
+      // stay testable locally. It never runs once SMTP is set up.
       this.logger.warn(
         `[email NOT sent — no SMTP configured] To ${email.to} — ${email.subject}\n${email.body}`,
       );
@@ -73,11 +86,11 @@ export class MailerService {
         subject: email.subject,
         text: email.body,
       });
-      this.logger.log(`Sent "${email.subject}" to ${email.to}`);
+      this.logger.log(`Sent ${email.logLabel} to ${email.to}`);
       return true;
     } catch (error) {
       this.logger.error(
-        `Failed to send "${email.subject}" to ${email.to}: ${error}`,
+        `Failed to send ${email.logLabel} to ${email.to}: ${error}`,
       );
       return false;
     }
