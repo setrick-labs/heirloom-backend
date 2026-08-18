@@ -1,0 +1,32 @@
+# Build configuration for Nixpacks (used by the Coolify deploy).
+#
+# Exists for one reason: `argon2` is a native module. It ships a prebuilt
+# binary for linux-x64/glibc — exactly what this builder is — but
+# node-gyp-build failed to match it and fell back to compiling from source,
+# and the default image has no Python, so the install died with
+# "Could not find any Python installation to use".
+#
+# The likely cause is libc detection: node-gyp-build decides glibc vs musl
+# from process.report's glibcVersionRuntime, which nix-built Node does not
+# always populate. Rather than depend on that resolving, this gives the image
+# a working toolchain so compiling succeeds whenever the prebuild is missed.
+#
+# Everything below other than python3/gnumake/gcc is copied verbatim from the
+# plan Nixpacks generated on its own (see "Final Nixpacks plan" in the build
+# log). Declaring `nixPkgs` replaces the auto-detected set, so the overlay and
+# pinned nixpkgs archive have to be restated or pnpm-9_x stops resolving.
+
+[phases.setup]
+nixPkgs = [
+  "nodejs_22",
+  "pnpm-9_x",
+  "openssl",
+  # --- needed only to build argon2 from source ---
+  "python3",
+  "gnumake",
+  "gcc",
+]
+nixLibs = ["gcc-unwrapped"]
+nixOverlays = ["https://github.com/railwayapp/nix-npm-overlay/archive/main.tar.gz"]
+nixpkgsArchive = "ffeebf0acf3ae8b29f8c7049cd911b9636efd7e7"
+aptPkgs = ["curl", "wget"]
