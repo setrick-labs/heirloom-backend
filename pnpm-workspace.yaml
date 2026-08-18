@@ -1,3 +1,15 @@
+# Not a monorepo — this single package is the only member.
+#
+# `packages` is required by pnpm 9, which is what the Nixpacks build image
+# installs (pnpm-9_x). pnpm 11 tolerates its absence, so a file carrying only
+# `allowBuilds` works locally and then fails the deploy with
+# "packages field missing or empty". Declaring the root keeps both happy.
+packages:
+  - '.'
+
+# These ship native code and must be allowed to run their install scripts —
+# argon2 in particular is what hashes passwords, so a silent skip would break
+# auth at runtime rather than at build time.
 allowBuilds:
   argon2: true
   esbuild: true

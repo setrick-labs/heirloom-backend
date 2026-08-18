@@ -29,3 +29,7 @@ pnpm-debug.log*
 
 # tsc
 *.tsbuildinfo
+
+tsconfig.tsbuildinfo
+
+tsconfig.build.json

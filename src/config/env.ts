@@ -44,6 +44,23 @@ export const envSchema = z.object({
     .min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
   JWT_REFRESH_EXPIRES_IN: durationSchema.default('30d'),
 
+  /**
+   * Whether to demand TLS on the database connection.
+   *
+   * Deliberately its own switch rather than being inferred from NODE_ENV.
+   * "Am I running in production" and "does my database speak TLS" are
+   * different questions, and conflating them means a database without TLS can
+   * only be reached by running the whole app in development mode — which is
+   * exactly how this deployment ended up on NODE_ENV=development, dragging
+   * devDependencies into the runtime with it.
+   *
+   * Defaults to on in production, so the safe thing still happens by default.
+   */
+  DATABASE_SSL: z.preprocess(
+    (value) => (value === '' || value === undefined ? undefined : value === 'true'),
+    z.boolean().optional(),
+  ),
+
   CORS_ORIGIN: z.string().default('*'),
 
   THROTTLE_TTL_MS: z.coerce.number().int().positive().default(60_000),
