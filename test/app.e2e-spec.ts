@@ -33,6 +33,31 @@ describe('HealthController (e2e)', () => {
       });
   });
 
+  it('/health/live (GET) stays 200 without consulting the database', () => {
+    return request(app.getHttpServer())
+      .get('/health/live')
+      .expect(200)
+      .expect((res) => {
+        const body = res.body as { success: boolean; data: { status: string } };
+        expect(body.success).toBe(true);
+        expect(body.data.status).toBe('alive');
+      });
+  });
+
+  it('/ (GET) identifies the service and points at the health routes', () => {
+    return request(app.getHttpServer())
+      .get('/')
+      .expect(200)
+      .expect((res) => {
+        const body = res.body as {
+          data: { name: string; health: string; liveness: string };
+        };
+        expect(body.data.name).toBe('Heirloom API');
+        expect(body.data.health).toBe('/health');
+        expect(body.data.liveness).toBe('/health/live');
+      });
+  });
+
   afterEach(async () => {
     await app.close();
   });

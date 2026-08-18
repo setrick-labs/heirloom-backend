@@ -63,6 +63,12 @@ export class StorageService {
     }
   }
 
+  /** Whether the S3 env vars are present. Lets callers distinguish
+   *  "not set up" from "set up but unreachable" — see HealthService. */
+  get isConfigured(): boolean {
+    return Boolean(this.client && this.bucket);
+  }
+
   private requireClient(): { client: S3Client; bucket: string } {
     if (!this.client || !this.bucket) {
       throw new InternalServerErrorException(

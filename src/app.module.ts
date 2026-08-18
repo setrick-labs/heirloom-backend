@@ -12,6 +12,7 @@ import { CommentsModule } from './modules/comments/comments.module';
 import { FamiliesModule } from './modules/families/families.module';
 import { GiftsModule } from './modules/gifts/gifts.module';
 import { HealthModule } from './modules/health/health.module';
+import { RootModule } from './modules/root/root.module';
 import { JourneysModule } from './modules/journeys/journeys.module';
 import { MediaModule } from './modules/media/media.module';
 import { MilestonesModule } from './modules/milestones/milestones.module';
@@ -78,6 +79,7 @@ import { SharedModule } from './shared/shared.module';
     GiftsModule,
     ViewsModule,
     HealthModule,
+    RootModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
