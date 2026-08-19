@@ -42,10 +42,18 @@ export class MediaController {
   /** Screens 12/19 — cover photo for a Family or a Journey. */
   @Post('cover-upload-url')
   requestCoverUploadUrl(
+    @CurrentUser() user: AuthenticatedUser,
     @Body(new ZodValidationPipe(requestCoverUploadUrlInputSchema))
     body: RequestCoverUploadUrlInput,
   ) {
-    return this.mediaService.requestCoverUploadUrl(body);
+    // A profile picture always belongs to whoever asked for it. Trusting the
+    // body's targetId here would let one account mint keys under another's
+    // path — harmless on its own (see requestCoverUploadUrl's note: an
+    // unreferenced key is inert, and PATCH /users/me binds it to the caller
+    // regardless), but it would litter storage with misattributed objects.
+    return this.mediaService.requestCoverUploadUrl(
+      body.scope === 'user' ? { ...body, targetId: user.id } : body,
+    );
   }
 
   /** Section 6: anyone with visibility into the milestone's journey, not just its creator. */

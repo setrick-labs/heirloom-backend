@@ -9,6 +9,8 @@ import { eq } from 'drizzle-orm';
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
 import { users } from '../../database/schema';
+import { StorageService } from '../../shared/services/storage.service';
+import { resolveStoredImageUrl } from '../../shared/utils/cover-url.util';
 import {
   getFamilyMembership,
   isActiveFamilyMember,
@@ -22,7 +24,10 @@ import {
 
 @Injectable()
 export class UsersService {
-  constructor(@Inject(DATABASE_CONNECTION) private readonly db: Database) {}
+  constructor(
+    @Inject(DATABASE_CONNECTION) private readonly db: Database,
+    private readonly storageService: StorageService,
+  ) {}
 
   async findById(id: string): Promise<User> {
     const user = await this.db.query.users.findFirst({
@@ -100,7 +105,13 @@ export class UsersService {
       email: row.email,
       phone: row.phone,
       name: row.name,
-      avatarUrl: row.avatarUrl,
+      // Presigned fresh from avatarStorageKey when the photo was uploaded
+      // through the app; falls back to the plain column.
+      avatarUrl: await resolveStoredImageUrl(
+        this.storageService,
+        row.avatarStorageKey,
+        row.avatarUrl,
+      ),
       bio: row.bio,
       role: membership?.role ?? 'member',
       activeFamilyId: row.activeFamilyId,

@@ -85,6 +85,13 @@
       "when": 1787010111736,
       "tag": "0011_media_hot_path_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787183334724,
+      "tag": "0012_pink_karma",
+      "breakpoints": true
     }
   ]
 }

@@ -29,7 +29,12 @@ export const users = pgTable(
     phone: varchar('phone', { length: 32 }).unique(),
     passwordHash: text('password_hash').notNull(),
     name: varchar('name', { length: 120 }).notNull(),
+    // Two columns, one DTO field — the same split families/journeys use for
+    // covers. `avatarStorageKey` is set when the photo was uploaded through
+    // the app and must be presigned fresh on read; `avatarUrl` holds a plain
+    // URL if one was ever set directly (seed data, an external host).
     avatarUrl: text('avatar_url'),
+    avatarStorageKey: text('avatar_storage_key'),
     bio: varchar('bio', { length: 500 }),
     status: userStatusEnum('status').notNull().default('pending'),
 

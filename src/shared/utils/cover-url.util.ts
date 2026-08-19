@@ -16,8 +16,21 @@ export async function resolveCoverImageUrl(
   storageService: StorageService,
   row: { coverStorageKey: string | null; coverImageUrl: string | null },
 ): Promise<string | null> {
-  if (!row.coverStorageKey) {
-    return row.coverImageUrl;
+  return resolveStoredImageUrl(storageService, row.coverStorageKey, row.coverImageUrl);
+}
+
+/**
+ * The same two-column rule, for any DTO field fed by an uploaded key with a
+ * plain-URL fallback. Profile pictures use it via `avatarStorageKey` /
+ * `avatarUrl`; covers go through `resolveCoverImageUrl` above.
+ */
+export async function resolveStoredImageUrl(
+  storageService: StorageService,
+  storageKey: string | null,
+  fallbackUrl: string | null,
+): Promise<string | null> {
+  if (!storageKey) {
+    return fallbackUrl;
   }
-  return storageService.generatePresignedDownloadUrl(row.coverStorageKey);
+  return storageService.generatePresignedDownloadUrl(storageKey);
 }

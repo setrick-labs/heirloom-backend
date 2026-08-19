@@ -39,7 +39,17 @@ export type CreateUserInput = z.infer<typeof createUserInputSchema>;
 
 export const updateUserInputSchema = userSchema
   .pick({ name: true, avatarUrl: true, bio: true })
-  .partial();
+  .partial()
+  .extend({
+    /**
+     * The key returned by POST /media/cover-upload-url with scope 'user'.
+     *
+     * Separate from `avatarUrl` because an upload produces a *key*, not a
+     * URL: the URL is presigned fresh on every read and would be expired
+     * long before anyone looked at it. Null clears the photo.
+     */
+    avatarStorageKey: z.string().min(1).nullable().optional(),
+  });
 export type UpdateUserInput = z.infer<typeof updateUserInputSchema>;
 
 export const switchActiveFamilyInputSchema = z.object({

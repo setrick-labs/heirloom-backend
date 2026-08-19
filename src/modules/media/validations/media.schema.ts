@@ -65,7 +65,7 @@ export type RequestUploadUrlInput = z.infer<typeof requestUploadUrlInputSchema>;
  * call that accepts `coverStorageKey`.
  */
 export const requestCoverUploadUrlInputSchema = z.object({
-  scope: z.enum(['family', 'journey']),
+  scope: z.enum(['family', 'journey', 'user']),
   targetId: idSchema,
   contentType: z.string().min(1),
   sizeBytes: z.number().int().positive(),

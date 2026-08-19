@@ -13,7 +13,7 @@ export interface VaultItemKeyParams {
 }
 
 export interface CoverKeyParams {
-  scope: 'family' | 'journey';
+  scope: 'family' | 'journey' | 'user';
   targetId: string;
   extension: string;
 }
@@ -41,9 +41,9 @@ export const StorageKeys = {
 
   /**
    * covers/{scope}/{targetId}/{uuid}.{ext} — family and journey cover
-   * photos (Screens 12 and 19). Namespaced away from journeyMedia so a
-   * cover is never picked up by anything that walks a journey's media
-   * prefix.
+   * photos (Screens 12 and 19), and profile pictures. Namespaced away from
+   * journeyMedia so a cover is never picked up by anything that walks a
+   * journey's media prefix.
    */
   cover({ scope, targetId, extension }: CoverKeyParams): string {
     return `covers/${scope}/${targetId}/${randomUUID()}.${extension}`;
