@@ -9,6 +9,8 @@ import {
   media,
   milestones,
 } from '../../database/schema';
+import { StorageService } from '../../shared/services/storage.service';
+import { resolveStoredImageUrl } from '../../shared/utils/cover-url.util';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
 import type { SearchQuery, SearchResult } from './validations/search.schema';
 
@@ -17,7 +19,10 @@ const PER_KIND_LIMIT = 25;
 
 @Injectable()
 export class SearchService {
-  constructor(@Inject(DATABASE_CONNECTION) private readonly db: Database) {}
+  constructor(
+    @Inject(DATABASE_CONNECTION) private readonly db: Database,
+    private readonly storageService: StorageService,
+  ) {}
 
   /**
    * Searches journey titles, milestone titles/locations, and memory
@@ -54,6 +59,8 @@ export class SearchService {
         .select({
           id: journeys.id,
           title: journeys.title,
+          coverStorageKey: journeys.coverStorageKey,
+          coverImageUrl: journeys.coverImageUrl,
           createdAt: journeys.createdAt,
         })
         .from(journeys)
@@ -67,6 +74,8 @@ export class SearchService {
           journeyId: milestones.journeyId,
           title: milestones.title,
           location: milestones.location,
+          coverStorageKey: milestones.coverStorageKey,
+          coverImageUrl: milestones.coverImageUrl,
           createdAt: milestones.createdAt,
         })
         .from(milestones)
@@ -88,6 +97,8 @@ export class SearchService {
           journeyId: milestones.journeyId,
           milestoneTitle: milestones.title,
           caption: media.caption,
+          storageKey: media.storageKey,
+          thumbnailStorageKey: media.thumbnailStorageKey,
           createdAt: media.createdAt,
         })
         .from(media)
@@ -102,28 +113,61 @@ export class SearchService {
         .limit(PER_KIND_LIMIT),
     ]);
 
+    // Presigning is a local signature, not a round trip, so resolving every
+    // row's image costs no extra queries — and a result list of coloured
+    // placeholders is most of what makes search feel like a stub.
+    const [journeyCovers, milestoneCovers, mediaThumbs] = await Promise.all([
+      Promise.all(
+        journeyRows.map((row) =>
+          resolveStoredImageUrl(
+            this.storageService,
+            row.coverStorageKey,
+            row.coverImageUrl,
+          ),
+        ),
+      ),
+      Promise.all(
+        milestoneRows.map((row) =>
+          resolveStoredImageUrl(
+            this.storageService,
+            row.coverStorageKey,
+            row.coverImageUrl,
+          ),
+        ),
+      ),
+      Promise.all(
+        mediaRows.map((row) =>
+          this.storageService.generatePresignedDownloadUrl(
+            // Falls back to the original when the thumbnail variant hasn't
+            // been generated yet, as MediaService.toDto does.
+            row.thumbnailStorageKey ?? row.storageKey,
+          ),
+        ),
+      ),
+    ]);
+
     const results: SearchResult[] = [
-      ...journeyRows.map((row) => ({
+      ...journeyRows.map((row, index) => ({
         kind: 'journey' as const,
         id: row.id,
         title: row.title,
         subtitle: null,
         journeyId: row.id,
         milestoneId: null,
-        thumbnailUrl: null,
+        thumbnailUrl: journeyCovers[index] ?? null,
         createdAt: row.createdAt.toISOString(),
       })),
-      ...milestoneRows.map((row) => ({
+      ...milestoneRows.map((row, index) => ({
         kind: 'milestone' as const,
         id: row.id,
         title: row.title,
         subtitle: journeyTitleById.get(row.journeyId) ?? null,
         journeyId: row.journeyId,
         milestoneId: row.id,
-        thumbnailUrl: null,
+        thumbnailUrl: milestoneCovers[index] ?? null,
         createdAt: row.createdAt.toISOString(),
       })),
-      ...mediaRows.map((row) => ({
+      ...mediaRows.map((row, index) => ({
         kind: 'memory' as const,
         id: row.id,
         title: row.caption ?? 'Untitled memory',
@@ -132,7 +176,7 @@ export class SearchService {
           .join(' · '),
         journeyId: row.journeyId,
         milestoneId: row.milestoneId,
-        thumbnailUrl: null,
+        thumbnailUrl: mediaThumbs[index] ?? null,
         createdAt: row.createdAt.toISOString(),
       })),
     ];

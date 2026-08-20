@@ -21,6 +21,8 @@ export const familyMemberViewSchema = z.object({
   /** The nickname this member chose for this family (Screen 14), or null. */
   nickname: z.string().nullable(),
   resolvedName: z.string(),
+  /** Presigned on read, like every other stored image. Null when unset. */
+  avatarUrl: z.url().nullable(),
   hasAlias: z.boolean(),
   nameSource: z.enum(['alias', 'nickname', 'name']),
 });

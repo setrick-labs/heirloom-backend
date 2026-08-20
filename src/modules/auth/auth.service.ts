@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   HttpException,
   HttpStatus,
@@ -26,6 +27,7 @@ import { GiftsService } from '../gifts/gifts.service';
 import { UsersService } from '../users/users.service';
 import type { User } from '../users/validations/user.schema';
 import type {
+  ChangePasswordInput,
   ForgotPasswordInput,
   ResendVerificationInput,
   ResetPasswordInput,
@@ -289,6 +291,48 @@ export class AuthService {
         })
         .where(eq(users.id, record.userId));
     });
+  }
+
+  /**
+   * Section 2: changing a password from inside the app.
+   *
+   * Deliberately mirrors `resetPassword`'s aftermath — the new hash lands and
+   * `sessionsInvalidatedAt` moves, so every other device is signed out. If the
+   * reason for the change is that someone else had the old password, leaving
+   * their session alive would defeat the whole exercise.
+   */
+  async changePassword(userId: string, input: ChangePasswordInput): Promise<void> {
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+    if (!user) {
+      throw new UnauthorizedException('Account not found');
+    }
+
+    const matches = await argon2.verify(user.passwordHash, input.currentPassword);
+    if (!matches) {
+      throw new UnauthorizedException('That is not your current password');
+    }
+
+    if (input.currentPassword === input.newPassword) {
+      throw new BadRequestException(
+        'Your new password needs to be different from the old one',
+      );
+    }
+
+    const passwordHash = await argon2.hash(input.newPassword);
+    const now = new Date();
+
+    await this.db
+      .update(users)
+      .set({
+        passwordHash,
+        sessionsInvalidatedAt: now,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        updatedAt: now,
+      })
+      .where(eq(users.id, userId));
   }
 
   async refresh(refreshToken: string): Promise<AuthTokens> {

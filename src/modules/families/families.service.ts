@@ -20,7 +20,10 @@ import {
 } from '../../database/schema';
 import { StorageService } from '../../shared/services/storage.service';
 import { generateNumericCode } from '../../shared/utils/auth-tokens.util';
-import { resolveCoverImageUrl } from '../../shared/utils/cover-url.util';
+import {
+  resolveCoverImageUrl,
+  resolveStoredImageUrl,
+} from '../../shared/utils/cover-url.util';
 import { resolveDisplayName } from '../../shared/utils/display-name.util';
 import {
   getFamilyMembership,
@@ -116,6 +119,8 @@ export class FamiliesService {
         joinedAt: familyMembers.joinedAt,
         nickname: familyMembers.nickname,
         displayName: users.name,
+        avatarUrl: users.avatarUrl,
+        avatarStorageKey: users.avatarStorageKey,
       })
       .from(familyMembers)
       .innerJoin(users, eq(familyMembers.userId, users.id))
@@ -131,10 +136,21 @@ export class FamiliesService {
       aliasRows.map((row) => [row.subjectUserId, row.nickname]),
     );
 
-    return rows.map((row) => ({
+    const avatars = await Promise.all(
+      rows.map((row) =>
+        resolveStoredImageUrl(
+          this.storageService,
+          row.avatarStorageKey,
+          row.avatarUrl,
+        ),
+      ),
+    );
+
+    return rows.map((row, index) => ({
       userId: row.userId,
       role: row.role,
       joinedAt: row.joinedAt.toISOString(),
+      avatarUrl: avatars[index] ?? null,
       ...resolveDisplayName({
         displayName: row.displayName,
         nickname: row.nickname,

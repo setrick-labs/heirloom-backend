@@ -1,6 +1,10 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 
+import {
+  type AuthenticatedUser,
+  CurrentUser,
+} from '../../shared/guards/current-user.decorator';
 import { Public } from '../../shared/guards/public.decorator';
 import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
 import { apiResponse } from '../../shared/types/api-response';
@@ -12,6 +16,8 @@ import {
   refreshTokenInputSchema,
   type ResendVerificationInput,
   resendVerificationInputSchema,
+  type ChangePasswordInput,
+  changePasswordInputSchema,
   type ResetPasswordInput,
   resetPasswordInputSchema,
   type SignInInput,
@@ -98,6 +104,22 @@ export class AuthController {
   ) {
     await this.authService.resetPassword(body);
     return apiResponse('Password reset. Please sign in again.');
+  }
+
+  /**
+   * Signed-in password change. Not `@Public()` — the caller must already be
+   * authenticated, and proves it is really them with the current password.
+   */
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('change-password')
+  async changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(changePasswordInputSchema))
+    body: ChangePasswordInput,
+  ) {
+    await this.authService.changePassword(user.id, body);
+    return apiResponse('Password changed. Your other devices have been signed out.');
   }
 
   @Public()

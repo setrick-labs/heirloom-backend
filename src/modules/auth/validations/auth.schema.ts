@@ -57,6 +57,20 @@ export const resetPasswordInputSchema = z.object({
 });
 export type ResetPasswordInput = z.infer<typeof resetPasswordInputSchema>;
 
+/**
+ * Changing a password while signed in (Settings > Account).
+ *
+ * Distinct from `resetPassword`, which proves identity with an emailed token
+ * because the user *can't* sign in. Here they already are, so the proof is the
+ * current password — and requiring it is what stops a borrowed unlocked phone
+ * from becoming a permanent account takeover.
+ */
+export const changePasswordInputSchema = z.object({
+  currentPassword: z.string().min(1).max(72),
+  newPassword: z.string().min(8).max(72),
+});
+export type ChangePasswordInput = z.infer<typeof changePasswordInputSchema>;
+
 export const refreshTokenInputSchema = z.object({
   refreshToken: z.string().min(1),
 });
