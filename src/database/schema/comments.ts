@@ -1,4 +1,10 @@
-import { pgTable, uuid, text, index } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  text,
+  index,
+  type AnyPgColumn,
+} from 'drizzle-orm/pg-core';
 
 import { timestamps } from './_helpers';
 import { commentTypeEnum, contentTargetTypeEnum } from './enums';
@@ -23,6 +29,18 @@ export const comments = pgTable(
     mediaId: uuid('media_id').references(() => media.id, {
       onDelete: 'set null',
     }),
+    /**
+     * The comment this one replies to, or null for a top-level comment.
+     *
+     * Exactly one level deep: a reply always hangs off a top-level comment,
+     * never off another reply. Enforced in the service, because a nested
+     * thread that can grow without limit is a different product from the one
+     * this is — and deleting a parent takes its replies with it, since a
+     * reply to nothing is not readable.
+     */
+    parentId: uuid('parent_id').references((): AnyPgColumn => comments.id, {
+      onDelete: 'cascade',
+    }),
     ...timestamps,
   },
   (table) => [
@@ -30,6 +48,7 @@ export const comments = pgTable(
       table.targetType,
       table.targetId,
     ),
+    index('comments_parent_id_idx').on(table.parentId),
   ],
 );
 

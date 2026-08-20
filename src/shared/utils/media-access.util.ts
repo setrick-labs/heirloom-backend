@@ -2,7 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 
 import type { Database } from '../../database/connection';
-import { media, milestones } from '../../database/schema';
+import { comments, media, milestones } from '../../database/schema';
 import { requireJourneyAccess } from './journey-access.util';
 
 /** Resolves a media row's owning journey, so the same access boundary as the journey/milestone applies. */
@@ -44,18 +44,36 @@ export async function requireMediaOwner(
 }
 
 /**
- * Comments/reactions are polymorphic (target 'milestone' or 'media' — see
- * database/schema/enums.ts). This module only ever drives targetType
- * 'media' from the client (Milestones spec Section 3/9: scoped to a single
- * image/video, never the milestone as a whole), but the check stays generic
- * since the schema itself is.
+ * Comments/reactions are polymorphic (see database/schema/enums.ts). The
+ * client drives 'media' for comments (Milestones spec Section 3/9: scoped to
+ * a single image/video, never the milestone as a whole) and 'comment' for
+ * likes on those comments, but the check stays generic since the schema
+ * itself is.
  */
 export async function requireTargetAccess(
   db: Database,
   userId: string,
-  targetType: 'milestone' | 'media' | 'moment' | 'event',
+  targetType: 'milestone' | 'media' | 'moment' | 'event' | 'comment',
   targetId: string,
 ): Promise<void> {
+  if (targetType === 'comment') {
+    // A comment has no access rules of its own — it inherits whatever guards
+    // the thing it was written on. Liking a comment is exactly as permitted
+    // as seeing the photo it sits under.
+    const comment = await db.query.comments.findFirst({
+      where: eq(comments.id, targetId),
+    });
+    if (!comment) {
+      throw new NotFoundException('Comment not found');
+    }
+    await requireTargetAccess(
+      db,
+      userId,
+      comment.targetType,
+      comment.targetId,
+    );
+    return;
+  }
   if (targetType === 'media') {
     await requireMediaAccess(db, userId, targetId);
     return;

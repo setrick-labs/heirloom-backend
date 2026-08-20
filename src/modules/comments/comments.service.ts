@@ -4,17 +4,26 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
-import { comments } from '../../database/schema';
+import { comments, reactions } from '../../database/schema';
 import { requireTargetAccess } from '../../shared/utils/media-access.util';
 import {
   Comment,
   CommentTargetType,
   CreateCommentInput,
 } from './validations/comment.schema';
+
+/**
+ * The heart on a comment.
+ *
+ * A comment like is an ordinary reaction with `targetType: 'comment'`, so it
+ * reuses the reactions table, its unique constraint and its endpoints rather
+ * than growing a parallel table that does the same job.
+ */
+export const COMMENT_LIKE_EMOJI = '❤️';
 
 @Injectable()
 export class CommentsService {
@@ -29,6 +38,10 @@ export class CommentsService {
       input.targetId,
     );
 
+    if (input.parentId) {
+      await this.assertRepliableParent(input);
+    }
+
     const [created] = await this.db
       .insert(comments)
       .values({
@@ -38,12 +51,48 @@ export class CommentsService {
         type: input.type,
         body: input.body,
         mediaId: input.mediaId,
+        parentId: input.parentId ?? null,
       })
       .returning();
-    return this.toDto(authorId, created);
+    return this.toDto(authorId, created, { replyCount: 0 });
   }
 
-  /** One flat, chronological stream — no threading, including 'version' comments (Section 4). */
+  /**
+   * A reply must point at a top-level comment on the same target.
+   *
+   * Two things are being refused. Replying across targets would let a comment
+   * on one photo be threaded under another, which no screen could render
+   * coherently. Replying to a reply would make the thread arbitrarily deep,
+   * and the sheet draws exactly two levels — so the limit is enforced where
+   * it can actually hold, rather than hoped for in the client.
+   */
+  private async assertRepliableParent(input: CreateCommentInput) {
+    const parent = await this.db.query.comments.findFirst({
+      where: eq(comments.id, input.parentId!),
+    });
+    if (!parent) {
+      throw new NotFoundException('The comment being replied to no longer exists');
+    }
+    if (
+      parent.targetType !== input.targetType ||
+      parent.targetId !== input.targetId
+    ) {
+      throw new ForbiddenException('That comment belongs to something else');
+    }
+    if (parent.parentId) {
+      throw new ForbiddenException('Replies only go one level deep');
+    }
+  }
+
+  /**
+   * One chronological stream, parents and replies together, including
+   * 'version' comments (Section 4).
+   *
+   * Deliberately still flat on the wire. The client groups by `parentId` to
+   * draw the two levels, and a flat list keeps this to three queries however
+   * many replies there are — nesting server-side would mean either a
+   * recursive query or one round trip per parent.
+   */
   async list(
     viewerId: string,
     targetType: CommentTargetType,
@@ -57,7 +106,38 @@ export class CommentsService {
       ),
       orderBy: asc(comments.createdAt),
     });
-    return rows.map((row) => this.toDto(viewerId, row));
+    if (rows.length === 0) return [];
+
+    const likes = await this.db.query.reactions.findMany({
+      where: and(
+        eq(reactions.targetType, 'comment'),
+        inArray(
+          reactions.targetId,
+          rows.map((row) => row.id),
+        ),
+      ),
+    });
+
+    const likeCounts = new Map<string, number>();
+    const likedByMe = new Set<string>();
+    for (const like of likes) {
+      likeCounts.set(like.targetId, (likeCounts.get(like.targetId) ?? 0) + 1);
+      if (like.userId === viewerId) likedByMe.add(like.targetId);
+    }
+
+    const replyCounts = new Map<string, number>();
+    for (const row of rows) {
+      if (!row.parentId) continue;
+      replyCounts.set(row.parentId, (replyCounts.get(row.parentId) ?? 0) + 1);
+    }
+
+    return rows.map((row) =>
+      this.toDto(viewerId, row, {
+        replyCount: replyCounts.get(row.id) ?? 0,
+        likeCount: likeCounts.get(row.id) ?? 0,
+        likedByMe: likedByMe.has(row.id),
+      }),
+    );
   }
 
   /** Author-only — a person's own contributions are theirs to remove, nobody else's (Section 9). */
@@ -76,7 +156,11 @@ export class CommentsService {
     await this.db.delete(comments).where(eq(comments.id, id));
   }
 
-  private toDto(viewerId: string, row: typeof comments.$inferSelect): Comment {
+  private toDto(
+    viewerId: string,
+    row: typeof comments.$inferSelect,
+    counts: { replyCount?: number; likeCount?: number; likedByMe?: boolean } = {},
+  ): Comment {
     return {
       id: row.id,
       targetType: row.targetType,
@@ -85,6 +169,10 @@ export class CommentsService {
       type: row.type,
       body: row.body,
       mediaId: row.mediaId,
+      parentId: row.parentId,
+      replyCount: counts.replyCount ?? 0,
+      likeCount: counts.likeCount ?? 0,
+      likedByMe: counts.likedByMe ?? false,
       canDelete: row.authorId === viewerId,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),

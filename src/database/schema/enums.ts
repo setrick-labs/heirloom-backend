@@ -52,12 +52,17 @@ export const mediaProcessingStatusEnum = pgEnum('media_processing_status', [
  * Polymorphic target kind for comments/reactions. `moment` and `event` don't
  * have their own tables (they're computed views over media/milestones), but
  * the tag is kept here so comments/reactions can still reference them.
+ *
+ * `comment` is what makes a comment likeable. Because reactions are already
+ * polymorphic, adding the tag is the whole feature — the reactions table,
+ * service, endpoints and access checks all work on comments unchanged.
  */
 export const contentTargetTypeEnum = pgEnum('content_target_type', [
   'milestone',
   'media',
   'moment',
   'event',
+  'comment',
 ]);
 
 /**

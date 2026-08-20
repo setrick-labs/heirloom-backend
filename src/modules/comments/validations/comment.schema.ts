@@ -17,6 +17,10 @@ export const commentTargetTypeSchema = z.enum([
   'media',
   'moment',
   'event',
+  // A comment is never *written on* a comment — replies use `parentId`. The
+  // tag exists so a comment can be reacted to; it is here only because the
+  // enum is shared with reactions.
+  'comment',
 ]);
 export type CommentTargetType = z.infer<typeof commentTargetTypeSchema>;
 
@@ -37,6 +41,13 @@ export const commentSchema = z.object({
   type: commentTypeSchema.default('text'),
   body: z.string().min(1).max(2000).nullable().optional(),
   mediaId: idSchema.nullable().optional(),
+  /** The comment being replied to. Null for a top-level comment. */
+  parentId: idSchema.nullable().optional(),
+  /** Replies hanging off this one. Always 0 on a reply — depth is capped at 1. */
+  replyCount: z.number().int().nonnegative().default(0),
+  /** Hearts on this comment, from reactions with targetType 'comment'. */
+  likeCount: z.number().int().nonnegative().default(0),
+  likedByMe: z.boolean().default(false),
   /** Only the author can remove their own comment (Section 9). */
   canDelete: z.boolean(),
   createdAt: isoDateTimeSchema,
@@ -51,6 +62,7 @@ export const createCommentInputSchema = commentSchema
     type: true,
     body: true,
     mediaId: true,
+    parentId: true,
   })
   .refine(
     (value) =>
