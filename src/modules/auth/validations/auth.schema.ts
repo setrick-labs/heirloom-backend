@@ -52,7 +52,13 @@ export const forgotPasswordInputSchema = z.object({
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordInputSchema>;
 
 export const resetPasswordInputSchema = z.object({
-  token: z.string().min(1),
+  /**
+   * Who is resetting. Required because the proof is now a 6-digit code, not
+   * an opaque token: a code is only unique *per user*, so the lookup has to
+   * be scoped to one account or someone else's code could match by chance.
+   */
+  identifier: z.string().min(1),
+  code: z.string().length(6).regex(/^\d+$/, 'Enter the 6-digit code'),
   newPassword: z.string().min(8).max(72),
 });
 export type ResetPasswordInput = z.infer<typeof resetPasswordInputSchema>;

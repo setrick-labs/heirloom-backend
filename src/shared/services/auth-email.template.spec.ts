@@ -22,15 +22,14 @@ describe('buildPasswordResetEmail', () => {
   it('never leaks the token into the subject line', () => {
     // Subjects show in notification previews and sync to places the body
     // doesn't; a single-use credential must not ride there.
-    expect(buildPasswordResetEmail('secret-token').subject).not.toContain('secret-token');
+    expect(buildPasswordResetEmail('482913').subject).not.toContain('482913');
   });
 
   it('always gives the recipient something actionable', () => {
-    // With no APP_LINK_BASE_URL configured there is no deep link to offer, so
-    // the raw token has to be in the body — an email referring to a button
-    // that isn't there is worse than an ugly one.
-    const body = buildPasswordResetEmail('secret-token').body;
-    expect(body).toContain('secret-token');
+    // The reset code is typed back into the app by hand, so the body is the
+    // only place it can live — there is no link, by design.
+    const body = buildPasswordResetEmail('482913').body;
+    expect(body).toContain('482913');
   });
 
   it('reassures someone who did not request it', () => {

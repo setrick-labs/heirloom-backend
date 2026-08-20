@@ -19,7 +19,6 @@ import { NotificationService } from '../../shared/services/notification.service'
 import { asDuration } from '../../shared/types/duration';
 import {
   generateNumericCode,
-  generateOpaqueToken,
   hashToken,
 } from '../../shared/utils/auth-tokens.util';
 import { resolveActiveFamilyId } from '../../shared/utils/family-membership.util';
@@ -228,7 +227,11 @@ export class AuthService {
         ),
       );
 
-    const rawToken = generateOpaqueToken();
+    // A 6-digit code rather than an opaque token: it arrives by email and is
+    // typed back in by hand, so it has to be short enough to read off a
+    // screen. Scoped per user at verification time, which is what keeps a
+    // million-value space safe — see resetPassword.
+    const rawToken = generateNumericCode();
     await this.db.insert(authTokens).values({
       userId: user.id,
       type: 'password_reset',
@@ -245,27 +248,37 @@ export class AuthService {
   }
 
   async resetPassword(input: ResetPasswordInput): Promise<void> {
-    const tokenHash = hashToken(input.token);
+    const user = await this.findByIdentifierString(input.identifier);
+    // Same wording as a wrong code: whether this address has an account is
+    // exactly what forgotPassword refuses to disclose, and answering
+    // differently here would give it away.
+    if (!user) {
+      throw new UnauthorizedException(
+        'This code is invalid or has expired. Request a new one.',
+      );
+    }
+
     const record = await this.db.query.authTokens.findFirst({
       where: and(
+        eq(authTokens.userId, user.id),
         eq(authTokens.type, 'password_reset'),
-        eq(authTokens.tokenHash, tokenHash),
+        eq(authTokens.tokenHash, hashToken(input.code)),
       ),
     });
 
     if (!record) {
       throw new UnauthorizedException(
-        'This reset link is invalid. Request a new one.',
+        'This code is invalid or has expired. Request a new one.',
       );
     }
     if (record.usedAt) {
       throw new UnauthorizedException(
-        'This reset link has already been used. Request a new one.',
+        'This code has already been used. Request a new one.',
       );
     }
     if (record.expiresAt <= new Date()) {
       throw new UnauthorizedException(
-        'This reset link has expired. Request a new one.',
+        'This code has expired. Request a new one.',
       );
     }
 
@@ -289,7 +302,7 @@ export class AuthService {
           lockedUntil: null,
           updatedAt: now,
         })
-        .where(eq(users.id, record.userId));
+        .where(eq(users.id, user.id));
     });
   }
 

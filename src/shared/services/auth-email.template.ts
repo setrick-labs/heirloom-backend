@@ -27,21 +27,18 @@ export function buildVerificationEmail(code: string): EmailContent {
   };
 }
 
-export function buildPasswordResetEmail(token: string): EmailContent {
-  // Without a configured app link there is still something actionable — the
-  // raw token — rather than an email that refers to a button that isn't there.
-  const link = env.APP_LINK_BASE_URL
-    ? `${env.APP_LINK_BASE_URL.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`
-    : null;
-
+export function buildPasswordResetEmail(code: string): EmailContent {
   return {
+    // The code stays out of the subject, unlike the verification email's.
+    // Subjects show in notification previews and sync to places the body
+    // doesn't, and this one opens an account whose password is being changed.
     subject: 'Reset your Heirloom password',
     body: [
       'We received a request to reset your Heirloom password.',
       '',
-      link ? `Reset it here: ${link}` : `Your reset code is: ${token}`,
+      `Your reset code is: ${code}`,
       '',
-      `This link expires in ${env.PASSWORD_RESET_TOKEN_TTL_MINUTES} minutes and can only be used once.`,
+      `Enter it in the app to choose a new password. It expires in ${env.PASSWORD_RESET_TOKEN_TTL_MINUTES} minutes and can only be used once.`,
       "If you didn't ask for this, nothing has changed — you can ignore this email.",
     ].join('\n'),
   };
