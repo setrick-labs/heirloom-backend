@@ -16,6 +16,8 @@ import {
   milestones,
   reactions,
 } from '../../database/schema';
+import { StorageService } from '../../shared/services/storage.service';
+import { resolveStoredImageUrl } from '../../shared/utils/cover-url.util';
 import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
 import { getUnreadCountsByMilestone } from '../../shared/utils/unread-counts.util';
 import { MediaProcessingService } from '../media/media-processing.service';
@@ -39,6 +41,20 @@ interface MilestoneComputedFields {
   contributorCount: number;
   /** Memories from other people since this viewer last opened this milestone. */
   unreadCount: number;
+  /** Up to three thumbnail URLs, newest first — the timeline card's peek. */
+  previewThumbnails: string[];
+  /** Presigned from coverStorageKey, else the plain column. */
+  coverImageUrl: string | null;
+}
+
+/** How many thumbnails the timeline card shows before it says "+N more". */
+const PREVIEW_THUMBNAILS = 3;
+
+/** A media row reduced to what a preview thumbnail needs. */
+interface PreviewSource {
+  createdAt: Date;
+  storageKey: string;
+  thumbnailStorageKey: string | null;
 }
 
 @Injectable()
@@ -46,6 +62,7 @@ export class MilestonesService {
   constructor(
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly mediaProcessingService: MediaProcessingService,
+    private readonly storageService: StorageService,
   ) {}
 
   /** Section 1: any visibility member, not owner-gated; requires the first media atomically. */
@@ -143,6 +160,11 @@ export class MilestonesService {
         milestoneId: media.milestoneId,
         createdAt: media.createdAt,
         ownerId: media.ownerId,
+        // For the card's preview strip. Taken from the query that was already
+        // being made rather than a second one — this list is deliberately
+        // four queries total for a whole journey, and it stays that way.
+        storageKey: media.storageKey,
+        thumbnailStorageKey: media.thumbnailStorageKey,
       })
       .from(media)
       .where(inArray(media.milestoneId, milestoneIds));
@@ -243,7 +265,26 @@ export class MilestonesService {
       milestoneIds,
     );
 
-    return rows.map((row) => {
+    const previewsByMilestoneId = new Map<string, PreviewSource[]>();
+    for (const m of mediaRows) {
+      if (!m.milestoneId) continue;
+      const list = previewsByMilestoneId.get(m.milestoneId);
+      if (list) list.push(m);
+      else previewsByMilestoneId.set(m.milestoneId, [m]);
+    }
+
+    // Presigning is a local signature, not a round trip, so this stays inside
+    // the four-query budget the batching above exists to protect.
+    const [previewsByRow, coversByRow] = await Promise.all([
+      Promise.all(
+        rows.map((row) =>
+          this.resolvePreviewThumbnails(previewsByMilestoneId.get(row.id) ?? []),
+        ),
+      ),
+      Promise.all(rows.map((row) => this.resolveCover(row))),
+    ]);
+
+    return rows.map((row, index) => {
       const timestamps = [
         ...(activityTimestampsByMilestoneId.get(row.id) ?? []),
       ];
@@ -261,6 +302,8 @@ export class MilestonesService {
         {
           contributorCount: contributorsByMilestoneId.get(row.id)?.size ?? 0,
           unreadCount: unreadByMilestoneId.get(row.id) ?? 0,
+          previewThumbnails: previewsByRow[index] ?? [],
+          coverImageUrl: coversByRow[index] ?? null,
         },
       );
     });
@@ -301,6 +344,9 @@ export class MilestonesService {
           : {}),
         ...(input.date !== undefined ? { date: new Date(input.date) } : {}),
         ...(input.location !== undefined ? { location: input.location } : {}),
+        ...(input.coverStorageKey !== undefined
+          ? { coverStorageKey: input.coverStorageKey }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(milestones.id, milestone.id))
@@ -391,6 +437,8 @@ export class MilestonesService {
         id: media.id,
         createdAt: media.createdAt,
         ownerId: media.ownerId,
+        storageKey: media.storageKey,
+        thumbnailStorageKey: media.thumbnailStorageKey,
       })
       .from(media)
       .where(eq(media.milestoneId, row.id));
@@ -463,7 +511,37 @@ export class MilestonesService {
       {
         contributorCount: new Set(mediaRows.map((m) => m.ownerId)).size,
         unreadCount: unreadByMilestoneId.get(row.id) ?? 0,
+        previewThumbnails: await this.resolvePreviewThumbnails(mediaRows),
+        coverImageUrl: await this.resolveCover(row),
       },
+    );
+  }
+
+  /**
+   * Newest first, capped at three.
+   *
+   * Falls back to the original key when a thumbnail variant is missing — an
+   * image whose processing pass hasn't run yet, or non-image media — which is
+   * the same fallback MediaService.toDto makes for a single item.
+   */
+  private resolvePreviewThumbnails(sources: PreviewSource[]): Promise<string[]> {
+    return Promise.all(
+      [...sources]
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .slice(0, PREVIEW_THUMBNAILS)
+        .map((m) =>
+          this.storageService.generatePresignedDownloadUrl(
+            m.thumbnailStorageKey ?? m.storageKey,
+          ),
+        ),
+    );
+  }
+
+  private resolveCover(row: MilestoneRow): Promise<string | null> {
+    return resolveStoredImageUrl(
+      this.storageService,
+      row.coverStorageKey,
+      row.coverImageUrl,
     );
   }
 
@@ -484,7 +562,9 @@ export class MilestonesService {
       description: row.description,
       date: row.date.toISOString(),
       location: row.location,
+      coverImageUrl: computed.coverImageUrl,
       mediaIds,
+      previewThumbnails: computed.previewThumbnails,
       reactionCount,
       memoryCount: mediaIds.length,
       contributorCount: computed.contributorCount,

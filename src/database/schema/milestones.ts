@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, timestamp, index, text } from 'drizzle-orm/pg-core';
 
 import { timestamps } from './_helpers';
 import { journeys } from './journeys';
@@ -15,6 +15,11 @@ export const milestones = pgTable(
     description: varchar('description', { length: 1000 }),
     date: timestamp('date', { withTimezone: true }).notNull(),
     location: varchar('location', { length: 200 }),
+    // Optional cover for the place — the same two-column split families and
+    // journeys use: a key uploaded through the app (presigned fresh on read,
+    // because those URLs expire) or a plain URL set directly.
+    coverImageUrl: text('cover_image_url'),
+    coverStorageKey: text('cover_storage_key'),
     createdBy: uuid('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),

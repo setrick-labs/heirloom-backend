@@ -13,7 +13,7 @@ export interface VaultItemKeyParams {
 }
 
 export interface CoverKeyParams {
-  scope: 'family' | 'journey' | 'user';
+  scope: 'family' | 'journey' | 'user' | 'milestone';
   targetId: string;
   extension: string;
 }

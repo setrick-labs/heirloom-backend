@@ -17,7 +17,16 @@ export const milestoneSchema = z.object({
   description: z.string().max(1000).nullable().optional(),
   date: isoDateTimeSchema,
   location: z.string().max(200).nullable().optional(),
+  /** Optional cover for the place. Presigned on read when uploaded in-app. */
+  coverImageUrl: z.url().nullable().optional(),
   mediaIds: z.array(idSchema).default([]),
+  /**
+   * Up to three thumbnail URLs, newest first — enough for the timeline card's
+   * peek without it fetching each media row itself. Deliberately capped
+   * server-side: the card shows three and a "+N more", so sending forty URLs
+   * would be forty presigns nobody looks at.
+   */
+  previewThumbnails: z.array(z.string()).default([]),
   /** Sum of reactions across all of this milestone's media (Milestones spec Section 5/9). */
   reactionCount: z.number().int().min(0).default(0),
   /** "12 memories" on Screen 24's header — always equals mediaIds.length. */
@@ -87,6 +96,11 @@ export const renameMilestoneInputSchema = z
     description: z.string().max(1000).nullable().optional(),
     date: isoDateTimeSchema.optional(),
     location: z.string().max(200).nullable().optional(),
+    /**
+     * Key from POST /media/cover-upload-url with scope 'milestone'. Null
+     * clears the cover; undefined leaves it alone, same as the fields above.
+     */
+    coverStorageKey: z.string().min(1).nullable().optional(),
   })
   .refine((value) => Object.values(value).some((field) => field !== undefined), {
     message: 'Provide at least one field to update',
