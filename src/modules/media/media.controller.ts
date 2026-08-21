@@ -8,6 +8,7 @@ import {
   Query,
   Body,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 
 import {
   type AuthenticatedUser,
@@ -30,6 +31,11 @@ import {
 export class MediaController {
   constructor(private readonly mediaService: MediaService) {}
 
+  // The default global limit (10 req/60s) is sized for occasional writes, not
+  // a batch of memories — each item here costs this call plus `create` below,
+  // so a 10-photo save alone would exhaust it. This is scoped to the upload
+  // endpoints only; the rest of the app keeps the tighter default.
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @Post('upload-url')
   requestUploadUrl(
     @CurrentUser() user: AuthenticatedUser,
@@ -40,6 +46,7 @@ export class MediaController {
   }
 
   /** Screens 12/19 — cover photo for a Family or a Journey. */
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @Post('cover-upload-url')
   requestCoverUploadUrl(
     @CurrentUser() user: AuthenticatedUser,
@@ -57,6 +64,7 @@ export class MediaController {
   }
 
   /** Section 6: anyone with visibility into the milestone's journey, not just its creator. */
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @Post()
   async create(
     @CurrentUser() user: AuthenticatedUser,
