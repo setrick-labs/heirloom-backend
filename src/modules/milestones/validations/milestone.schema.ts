@@ -54,11 +54,12 @@ export const milestoneSchema = z.object({
 export type Milestone = z.infer<typeof milestoneSchema>;
 
 /**
- * Section 1: a Milestone isn't a meaningful unit without its first photo/
- * video, so creation carries it atomically rather than allowing a
- * title-only placeholder. `id` is client-generated (a v4 uuid) because the
- * client needs it up front anyway, to scope the presigned-upload-url
- * request that has to happen before this call.
+ * `id` may be client-generated (a v4 uuid) when a caller needs it up front —
+ * e.g. to scope a presigned-upload-url request before this call — but the
+ * row's own default (`defaultRandom()`) covers every caller that doesn't,
+ * which today is every caller: a Milestone is a title-only placeholder at
+ * creation, with its first memory added afterward through the normal
+ * capture/upload flow rather than atomically here.
  */
 export const createMilestoneInputSchema = milestoneSchema
   .pick({
@@ -69,14 +70,16 @@ export const createMilestoneInputSchema = milestoneSchema
     date: true,
     location: true,
   })
-  .partial({ title: true, date: true })
+  .partial({ id: true, title: true, date: true })
   .extend({
-    media: z.object({
-      key: z.string().min(1),
-      type: mediaTypeSchema,
-      caption: mediaSchema.shape.caption,
-      sizeBytes: mediaSchema.shape.sizeBytes,
-    }),
+    media: z
+      .object({
+        key: z.string().min(1),
+        type: mediaTypeSchema,
+        caption: mediaSchema.shape.caption,
+        sizeBytes: mediaSchema.shape.sizeBytes,
+      })
+      .optional(),
   });
 export type CreateMilestoneInput = z.infer<typeof createMilestoneInputSchema>;
 

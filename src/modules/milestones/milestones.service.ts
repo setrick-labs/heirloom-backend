@@ -65,7 +65,7 @@ export class MilestonesService {
     private readonly storageService: StorageService,
   ) {}
 
-  /** Section 1: any visibility member, not owner-gated; requires the first media atomically. */
+  /** Section 1: any visibility member, not owner-gated. */
   async create(
     userId: string,
     input: CreateMilestoneInput,
@@ -80,13 +80,14 @@ export class MilestonesService {
 
     const date = input.date ? new Date(input.date) : new Date();
     const title = input.title?.trim() || formatDateLabel(date);
+    const media_ = input.media;
 
     const { milestone, createdMedia } = await this.db.transaction(
       async (tx) => {
         const [created] = await tx
           .insert(milestones)
           .values({
-            id: input.id,
+            ...(input.id ? { id: input.id } : {}),
             journeyId: input.journeyId,
             title,
             description: input.description,
@@ -96,18 +97,21 @@ export class MilestonesService {
           })
           .returning();
 
+        if (!media_) {
+          return { milestone: created, createdMedia: null };
+        }
+
         const [createdMedia] = await tx
           .insert(media)
           .values({
             familyId: journey.familyId,
             milestoneId: created.id,
             ownerId: userId,
-            type: input.media.type,
-            storageKey: input.media.key,
-            caption: input.media.caption,
-            sizeBytes: input.media.sizeBytes,
-            processingStatus:
-              input.media.type === 'image' ? 'pending' : undefined,
+            type: media_.type,
+            storageKey: media_.key,
+            caption: media_.caption,
+            sizeBytes: media_.sizeBytes,
+            processingStatus: media_.type === 'image' ? 'pending' : undefined,
           })
           .returning();
 
@@ -115,12 +119,16 @@ export class MilestonesService {
       },
     );
 
-    // Fire-and-forget — same reasoning as MediaService.create().
-    void this.mediaProcessingService.processAndPersist(
-      createdMedia.id,
-      createdMedia.storageKey,
-      input.media.type,
-    );
+    // Fire-and-forget — same reasoning as MediaService.create(). Only
+    // present when the caller supplied a first memory atomically; the
+    // ordinary path adds media afterward through MediaService.create.
+    if (createdMedia && media_) {
+      void this.mediaProcessingService.processAndPersist(
+        createdMedia.id,
+        createdMedia.storageKey,
+        media_.type,
+      );
+    }
 
     return this.withComputedFields(userId, journey, milestone);
   }
