@@ -4,6 +4,7 @@ import {
   idSchema,
   isoDateTimeSchema,
 } from '../../../shared/validations/common.schema';
+import { reactionSummarySchema } from '../../reactions/validations/reaction.schema';
 
 /**
  * Mirrors frontend/heirloom-mobile/src/schemas/comment.schema.ts field-for-field.
@@ -45,9 +46,8 @@ export const commentSchema = z.object({
   parentId: idSchema.nullable().optional(),
   /** Replies hanging off this one. Always 0 on a reply — depth is capped at 1. */
   replyCount: z.number().int().nonnegative().default(0),
-  /** Hearts on this comment, from reactions with targetType 'comment'. */
-  likeCount: z.number().int().nonnegative().default(0),
-  likedByMe: z.boolean().default(false),
+  /** Grouped by emoji — reactions with targetType 'comment' on this row. */
+  reactions: z.array(reactionSummarySchema).default([]),
   /** Only the author can remove their own comment (Section 9). */
   canDelete: z.boolean(),
   createdAt: isoDateTimeSchema,

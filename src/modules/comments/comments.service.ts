@@ -10,20 +10,12 @@ import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
 import { comments, reactions } from '../../database/schema';
 import { requireTargetAccess } from '../../shared/utils/media-access.util';
+import { ReactionSummary } from '../reactions/validations/reaction.schema';
 import {
   Comment,
   CommentTargetType,
   CreateCommentInput,
 } from './validations/comment.schema';
-
-/**
- * The heart on a comment.
- *
- * A comment like is an ordinary reaction with `targetType: 'comment'`, so it
- * reuses the reactions table, its unique constraint and its endpoints rather
- * than growing a parallel table that does the same job.
- */
-export const COMMENT_LIKE_EMOJI = '❤️';
 
 @Injectable()
 export class CommentsService {
@@ -54,7 +46,7 @@ export class CommentsService {
         parentId: input.parentId ?? null,
       })
       .returning();
-    return this.toDto(authorId, created, { replyCount: 0 });
+    return this.toDto(authorId, created, { replyCount: 0, reactions: [] });
   }
 
   /**
@@ -108,7 +100,7 @@ export class CommentsService {
     });
     if (rows.length === 0) return [];
 
-    const likes = await this.db.query.reactions.findMany({
+    const reactionRows = await this.db.query.reactions.findMany({
       where: and(
         eq(reactions.targetType, 'comment'),
         inArray(
@@ -118,12 +110,28 @@ export class CommentsService {
       ),
     });
 
-    const likeCounts = new Map<string, number>();
-    const likedByMe = new Set<string>();
-    for (const like of likes) {
-      likeCounts.set(like.targetId, (likeCounts.get(like.targetId) ?? 0) + 1);
-      if (like.userId === viewerId) likedByMe.add(like.targetId);
+    // Grouped by (comment, emoji) — same shape ReactionsService.list() builds
+    // for media, just keyed one level deeper since this covers every comment
+    // on the target in one pass rather than one target at a time.
+    const reactionsByComment = new Map<
+      string,
+      Map<string, { count: number; reactedByMe: boolean }>
+    >();
+    for (const row of reactionRows) {
+      const byEmoji =
+        reactionsByComment.get(row.targetId) ??
+        new Map<string, { count: number; reactedByMe: boolean }>();
+      const entry = byEmoji.get(row.emoji) ?? { count: 0, reactedByMe: false };
+      entry.count += 1;
+      if (row.userId === viewerId) entry.reactedByMe = true;
+      byEmoji.set(row.emoji, entry);
+      reactionsByComment.set(row.targetId, byEmoji);
     }
+    const summariesFor = (commentId: string): ReactionSummary[] =>
+      Array.from(reactionsByComment.get(commentId) ?? [], ([emoji, entry]) => ({
+        emoji,
+        ...entry,
+      }));
 
     const replyCounts = new Map<string, number>();
     for (const row of rows) {
@@ -134,8 +142,7 @@ export class CommentsService {
     return rows.map((row) =>
       this.toDto(viewerId, row, {
         replyCount: replyCounts.get(row.id) ?? 0,
-        likeCount: likeCounts.get(row.id) ?? 0,
-        likedByMe: likedByMe.has(row.id),
+        reactions: summariesFor(row.id),
       }),
     );
   }
@@ -159,7 +166,7 @@ export class CommentsService {
   private toDto(
     viewerId: string,
     row: typeof comments.$inferSelect,
-    counts: { replyCount?: number; likeCount?: number; likedByMe?: boolean } = {},
+    counts: { replyCount?: number; reactions?: ReactionSummary[] } = {},
   ): Comment {
     return {
       id: row.id,
@@ -171,8 +178,7 @@ export class CommentsService {
       mediaId: row.mediaId,
       parentId: row.parentId,
       replyCount: counts.replyCount ?? 0,
-      likeCount: counts.likeCount ?? 0,
-      likedByMe: counts.likedByMe ?? false,
+      reactions: counts.reactions ?? [],
       canDelete: row.authorId === viewerId,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),

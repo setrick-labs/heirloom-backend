@@ -5,12 +5,18 @@ import {
   isoDateTimeSchema,
 } from '../../../shared/validations/common.schema';
 
-/** Same polymorphic target as comments (database/schema/enums.ts) — Milestones spec drives 'media' only. */
+/**
+ * Same polymorphic target as comments (database/schema/enums.ts). 'comment'
+ * has to be here, not just in the DB enum: a comment like is an ordinary
+ * reaction with targetType 'comment' (see comments.service.ts), and this is
+ * the schema that gates every POST/DELETE/GET /reactions call.
+ */
 export const reactionTargetTypeSchema = z.enum([
   'milestone',
   'media',
   'moment',
   'event',
+  'comment',
 ]);
 export type ReactionTargetType = z.infer<typeof reactionTargetTypeSchema>;
 
