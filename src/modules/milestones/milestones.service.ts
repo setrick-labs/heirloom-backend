@@ -420,36 +420,52 @@ export class MilestonesService {
    *
    * Nothing but `journey_id` changes: media hangs off `milestone_id`, and
    * every viewer's unread watermark is keyed to the milestone's own id, so
-   * both follow the stop without being rewritten. What the move *does* change
-   * is who can see it — the destination journey's visibility now governs
-   * these memories, which is the point of moving it but is also why the
-   * destination has to be one the caller can already reach.
+   * both follow the stop without being rewritten.
+   *
+   * Deliberately does NOT go through `requireManage`, which is the
+   * rename/delete rule and also admits the milestone's creator. A move takes
+   * a stop out of one journey and puts it into another, and both halves are
+   * the journey owner's call — see milestone-move-policy.ts.
    */
   async move(
     userId: string,
     id: string,
     input: MoveMilestoneInput,
   ): Promise<Milestone> {
-    const { milestone, journey: source } = await this.requireManage(userId, id);
+    const milestone = await this.db.query.milestones.findFirst({
+      where: and(eq(milestones.id, id), isNull(milestones.deletedAt)),
+    });
+    if (!milestone) {
+      throw new NotFoundException('Milestone not found');
+    }
+
+    // Access first, ownership second, on each end in turn: a journey the
+    // caller cannot see at all must stay a 404, never a 403 that confirms it
+    // exists and belongs to someone else.
+    await requireJourneyAccess(this.db, userId, milestone.journeyId);
+    const source = await this.db.query.journeys.findFirst({
+      where: eq(journeys.id, milestone.journeyId),
+    });
+    if (!source) {
+      throw new NotFoundException('Milestone not found');
+    }
 
     if (isNoOpMove(milestone.journeyId, input.journeyId)) {
+      // Still has to be a move the caller could have made, or "move it where
+      // it already is" would be a way to probe permissions that says yes.
+      assertMilestoneMovable(source, source, userId);
       return this.withComputedFields(userId, source, milestone);
     }
 
-    // Same rule as creating a stop there: you may put a milestone into any
-    // journey you can already see.
     await requireJourneyAccess(this.db, userId, input.journeyId);
     const destination = await this.db.query.journeys.findFirst({
-      where: and(
-        eq(journeys.id, input.journeyId),
-        isNull(journeys.deletedAt),
-      ),
+      where: and(eq(journeys.id, input.journeyId), isNull(journeys.deletedAt)),
     });
     if (!destination) {
       throw new NotFoundException('Journey not found');
     }
 
-    assertMilestoneMovable(source, destination);
+    assertMilestoneMovable(source, destination, userId);
 
     const [updated] = await this.db
       .update(milestones)

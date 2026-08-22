@@ -66,8 +66,9 @@ export class MilestonesController {
   }
 
   /**
-   * Creator or source-journey owner, and the destination must be a journey
-   * the caller can already see — in the same family.
+   * Owner-only, on both ends: the caller must own the journey the place is
+   * leaving *and* the one it is going to, and the two must share a family.
+   * Stricter than rename/delete on purpose — see milestone-move-policy.ts.
    */
   @Post(':id/move')
   async move(
