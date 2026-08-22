@@ -20,6 +20,8 @@ import { MilestonesService } from './milestones.service';
 import {
   type CreateMilestoneInput,
   createMilestoneInputSchema,
+  type MoveMilestoneInput,
+  moveMilestoneInputSchema,
   type RenameMilestoneInput,
   renameMilestoneInputSchema,
 } from './validations/milestone.schema';
@@ -61,6 +63,21 @@ export class MilestonesController {
   ) {
     const milestone = await this.milestonesService.rename(user.id, id, body);
     return apiResponse(milestone, 'Milestone renamed');
+  }
+
+  /**
+   * Creator or source-journey owner, and the destination must be a journey
+   * the caller can already see — in the same family.
+   */
+  @Post(':id/move')
+  async move(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(moveMilestoneInputSchema))
+    body: MoveMilestoneInput,
+  ) {
+    const milestone = await this.milestonesService.move(user.id, id, body);
+    return apiResponse(milestone, 'Place moved');
   }
 
   /** Section 8: creator or journey owner, soft-delete with a grace period. */

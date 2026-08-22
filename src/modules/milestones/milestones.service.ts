@@ -22,8 +22,13 @@ import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
 import { getUnreadCountsByMilestone } from '../../shared/utils/unread-counts.util';
 import { MediaProcessingService } from '../media/media-processing.service';
 import {
+  assertMilestoneMovable,
+  isNoOpMove,
+} from './milestone-move-policy';
+import {
   CreateMilestoneInput,
   Milestone,
+  MoveMilestoneInput,
   RenameMilestoneInput,
 } from './validations/milestone.schema';
 
@@ -408,6 +413,51 @@ export class MilestonesService {
       .where(eq(milestones.id, id))
       .returning();
     return this.withComputedFields(userId, journey, updated);
+  }
+
+  /**
+   * Moves a stop to another journey, memories and all.
+   *
+   * Nothing but `journey_id` changes: media hangs off `milestone_id`, and
+   * every viewer's unread watermark is keyed to the milestone's own id, so
+   * both follow the stop without being rewritten. What the move *does* change
+   * is who can see it — the destination journey's visibility now governs
+   * these memories, which is the point of moving it but is also why the
+   * destination has to be one the caller can already reach.
+   */
+  async move(
+    userId: string,
+    id: string,
+    input: MoveMilestoneInput,
+  ): Promise<Milestone> {
+    const { milestone, journey: source } = await this.requireManage(userId, id);
+
+    if (isNoOpMove(milestone.journeyId, input.journeyId)) {
+      return this.withComputedFields(userId, source, milestone);
+    }
+
+    // Same rule as creating a stop there: you may put a milestone into any
+    // journey you can already see.
+    await requireJourneyAccess(this.db, userId, input.journeyId);
+    const destination = await this.db.query.journeys.findFirst({
+      where: and(
+        eq(journeys.id, input.journeyId),
+        isNull(journeys.deletedAt),
+      ),
+    });
+    if (!destination) {
+      throw new NotFoundException('Journey not found');
+    }
+
+    assertMilestoneMovable(source, destination);
+
+    const [updated] = await this.db
+      .update(milestones)
+      .set({ journeyId: destination.id, updatedAt: new Date() })
+      .where(eq(milestones.id, milestone.id))
+      .returning();
+
+    return this.withComputedFields(userId, destination, updated);
   }
 
   private async requireManage(

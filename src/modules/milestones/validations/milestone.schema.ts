@@ -109,3 +109,16 @@ export const renameMilestoneInputSchema = z
     message: 'Provide at least one field to update',
   });
 export type RenameMilestoneInput = z.infer<typeof renameMilestoneInputSchema>;
+
+/**
+ * Moving a stop to a different journey (Screen 24's ••• > Move to journey).
+ *
+ * Only the destination — everything else about the milestone is unchanged,
+ * and its memories follow it without being touched (see
+ * milestone-move-policy.ts for why the destination must share the source's
+ * family).
+ */
+export const moveMilestoneInputSchema = z.object({
+  journeyId: idSchema,
+});
+export type MoveMilestoneInput = z.infer<typeof moveMilestoneInputSchema>;
