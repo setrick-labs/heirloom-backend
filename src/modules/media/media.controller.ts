@@ -21,6 +21,8 @@ import { MediaService } from './media.service';
 import {
   type CreateMediaInput,
   createMediaInputSchema,
+  type RequestCommentAttachmentUploadUrlInput,
+  requestCommentAttachmentUploadUrlInputSchema,
   type RequestCoverUploadUrlInput,
   requestCoverUploadUrlInputSchema,
   type RequestUploadUrlInput,
@@ -61,6 +63,17 @@ export class MediaController {
     return this.mediaService.requestCoverUploadUrl(
       body.scope === 'user' ? { ...body, targetId: user.id } : body,
     );
+  }
+
+  /** A photo attached directly to a comment/reply — no Milestone involved. */
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Post('comment-upload-url')
+  requestCommentAttachmentUploadUrl(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(requestCommentAttachmentUploadUrlInputSchema))
+    body: RequestCommentAttachmentUploadUrlInput,
+  ) {
+    return this.mediaService.requestCommentAttachmentUploadUrl(user.id, body);
   }
 
   /** Section 6: anyone with visibility into the milestone's journey, not just its creator. */

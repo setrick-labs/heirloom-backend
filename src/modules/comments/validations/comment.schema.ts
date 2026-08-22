@@ -4,6 +4,7 @@ import {
   idSchema,
   isoDateTimeSchema,
 } from '../../../shared/validations/common.schema';
+import { mediaSchema } from '../../media/validations/media.schema';
 import { reactionSummarySchema } from '../../reactions/validations/reaction.schema';
 
 /**
@@ -42,6 +43,14 @@ export const commentSchema = z.object({
   type: commentTypeSchema.default('text'),
   body: z.string().min(1).max(2000).nullable().optional(),
   mediaId: idSchema.nullable().optional(),
+  /**
+   * Resolved server-side from `mediaId` — never accepted from a client, only
+   * ever present on responses. `mediaId` alone would mean every renderer of
+   * a comment thread has to know how to fetch+gate a Media row itself
+   * (and, for a comment-only attachment, `findById`/`requireMediaAccess`
+   * can't do that at all — see MediaService.resolveForComment).
+   */
+  attachment: mediaSchema.nullable().optional(),
   /** The comment being replied to. Null for a top-level comment. */
   parentId: idSchema.nullable().optional(),
   /** Replies hanging off this one. Always 0 on a reply — depth is capped at 1. */

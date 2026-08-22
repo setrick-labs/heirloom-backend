@@ -20,6 +20,7 @@ import { assertValidMediaUpload } from './media-upload-policy';
 import {
   CreateMediaInput,
   Media,
+  RequestCommentAttachmentUploadUrlInput,
   RequestCoverUploadUrlInput,
   RequestUploadUrlInput,
 } from './validations/media.schema';
@@ -111,6 +112,36 @@ export class MediaService {
   }
 
   /**
+   * Presigned PUT for a photo attached directly to a comment — no Journey
+   * or Milestone to check access through, so plain family membership is
+   * the whole gate (same posture as everyday family-scoped reads).
+   */
+  async requestCommentAttachmentUploadUrl(
+    userId: string,
+    input: RequestCommentAttachmentUploadUrlInput,
+  ): Promise<RequestUploadUrlResult> {
+    if (!(await isActiveFamilyMember(this.db, userId, input.familyId))) {
+      throw new NotFoundException('Family not found');
+    }
+
+    const extension = assertValidMediaUpload(
+      input.contentType,
+      input.sizeBytes,
+    );
+    const key = StorageKeys.commentAttachment({
+      familyId: input.familyId,
+      extension,
+    });
+    const uploadUrl = await this.storageService.generatePresignedUploadUrl(
+      key,
+      input.contentType,
+      UPLOAD_URL_TTL_SECONDS,
+    );
+
+    return { key, uploadUrl, expiresInSeconds: UPLOAD_URL_TTL_SECONDS };
+  }
+
+  /**
    * Section 6: adding media to an EXISTING Milestone — anyone with
    * visibility into the Milestone's journey, not just its creator. (The
    * *first* media on a new Milestone is inserted directly by
@@ -119,13 +150,22 @@ export class MediaService {
    * exists.)
    */
   async create(ownerId: string, input: CreateMediaInput): Promise<Media> {
-    const milestone = await this.db.query.milestones.findFirst({
-      where: eq(milestones.id, input.milestoneId),
-    });
-    if (!milestone) {
-      throw new NotFoundException('Milestone not found');
+    if (input.milestoneId) {
+      const milestone = await this.db.query.milestones.findFirst({
+        where: eq(milestones.id, input.milestoneId),
+      });
+      if (!milestone) {
+        throw new NotFoundException('Milestone not found');
+      }
+      await requireJourneyAccess(this.db, ownerId, milestone.journeyId);
+    } else {
+      // A comment attachment — no Milestone to check access through,
+      // family membership is the gate (same as requestCommentAttachmentUploadUrl,
+      // which minted this row's storage key in the first place).
+      if (!(await isActiveFamilyMember(this.db, ownerId, input.familyId))) {
+        throw new NotFoundException('Family not found');
+      }
     }
-    await requireJourneyAccess(this.db, ownerId, milestone.journeyId);
 
     const [created] = await this.db
       .insert(media)
@@ -153,6 +193,23 @@ export class MediaService {
       input.type,
     );
     return this.toDto(created);
+  }
+
+  /**
+   * Resolves a comment's attachment for embedding directly on the comment
+   * DTO — deliberately not `findById`/`requireMediaAccess`, both of which
+   * require a Milestone and would 404 a comment-attachment row every time.
+   * No access check here at all: the comment itself already gated who can
+   * see this (CommentsService calls this only after requireTargetAccess
+   * has passed), so re-checking milestone/journey access against a row
+   * that has neither would be wrong, not just redundant.
+   */
+  async resolveForComment(mediaId: string): Promise<Media | null> {
+    const row = await this.db.query.media.findFirst({
+      where: eq(media.id, mediaId),
+    });
+    if (!row) return null;
+    return this.toDto(row);
   }
 
   async listByFamily(userId: string, familyId: string): Promise<Media[]> {

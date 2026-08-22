@@ -9,7 +9,10 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
 import { comments, reactions } from '../../database/schema';
+import { MediaService } from '../media/media.service';
+import type { Media } from '../media/validations/media.schema';
 import { requireTargetAccess } from '../../shared/utils/media-access.util';
+import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
 import {
   REACTOR_NAMES_LIMIT,
   ReactionSummary,
@@ -22,7 +25,10 @@ import {
 
 @Injectable()
 export class CommentsService {
-  constructor(@Inject(DATABASE_CONNECTION) private readonly db: Database) {}
+  constructor(
+    @Inject(DATABASE_CONNECTION) private readonly db: Database,
+    private readonly mediaService: MediaService,
+  ) {}
 
   /** Anyone with visibility into the target's journey — not owner-gated. */
   async create(authorId: string, input: CreateCommentInput): Promise<Comment> {
@@ -37,6 +43,22 @@ export class CommentsService {
       await this.assertRepliableParent(input);
     }
 
+    // `CommentsService.create()` used to insert whatever `mediaId` a client
+    // sent with no check at all — nothing stopped one family's comment from
+    // pointing at another family's photo. Resolving (and gating) it here,
+    // once, also means the freshly-created comment's response can carry the
+    // attachment directly rather than the caller needing a second request.
+    let attachment: Media | null = null;
+    if (input.mediaId) {
+      attachment = await this.mediaService.resolveForComment(input.mediaId);
+      if (!attachment) {
+        throw new NotFoundException('Attachment not found');
+      }
+      if (!(await isActiveFamilyMember(this.db, authorId, attachment.familyId))) {
+        throw new ForbiddenException("You don't have access to that attachment");
+      }
+    }
+
     const [created] = await this.db
       .insert(comments)
       .values({
@@ -49,7 +71,11 @@ export class CommentsService {
         parentId: input.parentId ?? null,
       })
       .returning();
-    return this.toDto(authorId, created, { replyCount: 0, reactions: [] });
+    return this.toDto(authorId, created, {
+      replyCount: 0,
+      reactions: [],
+      attachment,
+    });
   }
 
   /**
@@ -150,11 +176,16 @@ export class CommentsService {
       replyCounts.set(row.parentId, (replyCounts.get(row.parentId) ?? 0) + 1);
     }
 
-    return rows.map((row) =>
-      this.toDto(viewerId, row, {
-        replyCount: replyCounts.get(row.id) ?? 0,
-        reactions: summariesFor(row.id),
-      }),
+    // One extra lookup per attachment, not per comment — most comments have
+    // none, and this is a new, low-volume feature rather than a hot path
+    // worth a batched query for yet.
+    return Promise.all(
+      rows.map((row) =>
+        this.toDto(viewerId, row, {
+          replyCount: replyCounts.get(row.id) ?? 0,
+          reactions: summariesFor(row.id),
+        }),
+      ),
     );
   }
 
@@ -174,11 +205,23 @@ export class CommentsService {
     await this.db.delete(comments).where(eq(comments.id, id));
   }
 
-  private toDto(
+  private async toDto(
     viewerId: string,
     row: typeof comments.$inferSelect,
-    counts: { replyCount?: number; reactions?: ReactionSummary[] } = {},
-  ): Comment {
+    extras: {
+      replyCount?: number;
+      reactions?: ReactionSummary[];
+      /** Pass this when already resolved (create()) to skip a redundant lookup; omit to resolve it here (list()). */
+      attachment?: Media | null;
+    } = {},
+  ): Promise<Comment> {
+    const attachment =
+      extras.attachment !== undefined
+        ? extras.attachment
+        : row.mediaId
+          ? await this.mediaService.resolveForComment(row.mediaId)
+          : null;
+
     return {
       id: row.id,
       targetType: row.targetType,
@@ -187,9 +230,10 @@ export class CommentsService {
       type: row.type,
       body: row.body,
       mediaId: row.mediaId,
+      attachment,
       parentId: row.parentId,
-      replyCount: counts.replyCount ?? 0,
-      reactions: counts.reactions ?? [],
+      replyCount: extras.replyCount ?? 0,
+      reactions: extras.reactions ?? [],
       canDelete: row.authorId === viewerId,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),

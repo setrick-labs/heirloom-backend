@@ -18,6 +18,11 @@ export interface CoverKeyParams {
   extension: string;
 }
 
+export interface CommentAttachmentKeyParams {
+  familyId: string;
+  extension: string;
+}
+
 /**
  * Single source of truth for R2 object key layout. Nothing in the codebase
  * should build a key by hand — go through these so the convention can't
@@ -47,6 +52,16 @@ export const StorageKeys = {
    */
   cover({ scope, targetId, extension }: CoverKeyParams): string {
     return `covers/${scope}/${targetId}/${randomUUID()}.${extension}`;
+  },
+
+  /**
+   * {familyId}/comments/{uuid}.{ext} — an image (or, later, a voice note)
+   * attached directly to a comment rather than to a Milestone. Namespaced
+   * away from journeyMedia for the same reason covers are: nothing that
+   * walks a journey's media prefix should ever pick this up.
+   */
+  commentAttachment({ familyId, extension }: CommentAttachmentKeyParams): string {
+    return `${familyId}/comments/${randomUUID()}.${extension}`;
   },
 
   /**

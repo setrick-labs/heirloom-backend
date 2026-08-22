@@ -36,7 +36,9 @@ export type Media = z.infer<typeof mediaSchema>;
  */
 export const createMediaInputSchema = z.object({
   familyId: idSchema,
-  milestoneId: idSchema,
+  // Absent for a comment attachment (MediaService.create branches on this) —
+  // everything else about registration is identical either way.
+  milestoneId: idSchema.optional(),
   type: mediaTypeSchema,
   key: z.string().min(1),
   caption: mediaSchema.shape.caption,
@@ -52,6 +54,20 @@ export const requestUploadUrlInputSchema = z.object({
   sizeBytes: z.number().int().positive(),
 });
 export type RequestUploadUrlInput = z.infer<typeof requestUploadUrlInputSchema>;
+
+/**
+ * Presigned PUT for a photo attached directly to a comment — no Milestone
+ * or Journey involved, so this asks for neither. Family membership is the
+ * whole access check (MediaService.requestCommentAttachmentUploadUrl).
+ */
+export const requestCommentAttachmentUploadUrlInputSchema = z.object({
+  familyId: idSchema,
+  contentType: z.string().min(1),
+  sizeBytes: z.number().int().positive(),
+});
+export type RequestCommentAttachmentUploadUrlInput = z.infer<
+  typeof requestCommentAttachmentUploadUrlInputSchema
+>;
 
 /**
  * Cover photos for a Family (Screen 12) or a Journey (Screen 19). Separate
