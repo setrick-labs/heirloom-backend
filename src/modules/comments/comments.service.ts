@@ -10,7 +10,10 @@ import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
 import { comments, reactions } from '../../database/schema';
 import { requireTargetAccess } from '../../shared/utils/media-access.util';
-import { ReactionSummary } from '../reactions/validations/reaction.schema';
+import {
+  REACTOR_NAMES_LIMIT,
+  ReactionSummary,
+} from '../reactions/validations/reaction.schema';
 import {
   Comment,
   CommentTargetType,
@@ -113,17 +116,25 @@ export class CommentsService {
     // Grouped by (comment, emoji) — same shape ReactionsService.list() builds
     // for media, just keyed one level deeper since this covers every comment
     // on the target in one pass rather than one target at a time.
-    const reactionsByComment = new Map<
-      string,
-      Map<string, { count: number; reactedByMe: boolean }>
-    >();
+    type ReactionEntry = {
+      count: number;
+      reactedByMe: boolean;
+      reactorIds: string[];
+    };
+    const reactionsByComment = new Map<string, Map<string, ReactionEntry>>();
     for (const row of reactionRows) {
       const byEmoji =
-        reactionsByComment.get(row.targetId) ??
-        new Map<string, { count: number; reactedByMe: boolean }>();
-      const entry = byEmoji.get(row.emoji) ?? { count: 0, reactedByMe: false };
+        reactionsByComment.get(row.targetId) ?? new Map<string, ReactionEntry>();
+      const entry = byEmoji.get(row.emoji) ?? {
+        count: 0,
+        reactedByMe: false,
+        reactorIds: [],
+      };
       entry.count += 1;
       if (row.userId === viewerId) entry.reactedByMe = true;
+      if (entry.reactorIds.length < REACTOR_NAMES_LIMIT) {
+        entry.reactorIds.push(row.userId);
+      }
       byEmoji.set(row.emoji, entry);
       reactionsByComment.set(row.targetId, byEmoji);
     }

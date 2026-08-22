@@ -7,6 +7,7 @@ import { reactions } from '../../database/schema';
 import { requireTargetAccess } from '../../shared/utils/media-access.util';
 import {
   AddReactionInput,
+  REACTOR_NAMES_LIMIT,
   ReactionSummary,
   ReactionTargetType,
 } from './validations/reaction.schema';
@@ -69,21 +70,39 @@ export class ReactionsService {
         eq(reactions.targetType, targetType),
         eq(reactions.targetId, targetId),
       ),
+      // Oldest first, so a capped reactorIds list below names the earliest
+      // reactors — the same "who reacted first" ordering people expect from
+      // a "Liked by X and N more" line.
+      orderBy: (row, { asc }) => [asc(row.createdAt)],
     });
 
-    const byEmoji = new Map<string, { count: number; reactedByMe: boolean }>();
+    const byEmoji = new Map<
+      string,
+      { count: number; reactedByMe: boolean; reactorIds: string[] }
+    >();
     for (const row of rows) {
-      const entry = byEmoji.get(row.emoji) ?? { count: 0, reactedByMe: false };
+      const entry = byEmoji.get(row.emoji) ?? {
+        count: 0,
+        reactedByMe: false,
+        reactorIds: [],
+      };
       entry.count += 1;
       if (row.userId === viewerId) entry.reactedByMe = true;
+      // Capped — the UI only ever names a handful of people regardless of
+      // how large the count gets, and an uncapped list would grow the
+      // payload with a popular photo for no benefit.
+      if (entry.reactorIds.length < REACTOR_NAMES_LIMIT) {
+        entry.reactorIds.push(row.userId);
+      }
       byEmoji.set(row.emoji, entry);
     }
 
     return Array.from(byEmoji.entries()).map(
-      ([emoji, { count, reactedByMe }]) => ({
+      ([emoji, { count, reactedByMe, reactorIds }]) => ({
         emoji,
         count,
         reactedByMe,
+        reactorIds,
       }),
     );
   }
