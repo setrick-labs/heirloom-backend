@@ -52,4 +52,17 @@ export class ReactionsController {
   ) {
     return this.reactionsService.list(user.id, targetType, targetId);
   }
+
+  /** The full "Liked by" list — everyone who reacted with this emoji, not the capped preview `list()` returns. */
+  @Get('reactors')
+  listReactors(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('targetType', new ZodValidationPipe(reactionTargetTypeSchema))
+    targetType: ReactionTargetType,
+    @Query('targetId', new ZodValidationPipe(idSchema)) targetId: string,
+    @Query('emoji', new ZodValidationPipe(z.string().min(1).max(16)))
+    emoji: string,
+  ) {
+    return this.reactionsService.listReactors(user.id, targetType, targetId, emoji);
+  }
 }

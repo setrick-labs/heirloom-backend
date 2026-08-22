@@ -106,4 +106,29 @@ export class ReactionsService {
       }),
     );
   }
+
+  /**
+   * The full "Liked by" list for one emoji on one target — everyone, not
+   * the `REACTOR_NAMES_LIMIT`-capped preview `list()` returns. Oldest first,
+   * same ordering as the capped list, so the preview's names are always a
+   * prefix of this one rather than a different sample.
+   */
+  async listReactors(
+    viewerId: string,
+    targetType: ReactionTargetType,
+    targetId: string,
+    emoji: string,
+  ): Promise<string[]> {
+    await requireTargetAccess(this.db, viewerId, targetType, targetId);
+    const rows = await this.db.query.reactions.findMany({
+      where: and(
+        eq(reactions.targetType, targetType),
+        eq(reactions.targetId, targetId),
+        eq(reactions.emoji, emoji),
+      ),
+      orderBy: (row, { asc }) => [asc(row.createdAt)],
+      columns: { userId: true },
+    });
+    return rows.map((row) => row.userId);
+  }
 }
