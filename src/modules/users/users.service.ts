@@ -21,7 +21,9 @@ import {
   type StorageUsage,
 } from '../../shared/utils/storage-quota.util';
 import {
+  NotificationPreferences,
   SwitchActiveFamilyInput,
+  UpdateNotificationPreferencesInput,
   UpdateUserInput,
   User,
 } from './validations/user.schema';
@@ -32,6 +34,57 @@ export class UsersService {
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly storageService: StorageService,
   ) {}
+
+  /** The five push toggles (Screen 36), as the app's own field names. */
+  async notificationPreferences(id: string): Promise<NotificationPreferences> {
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.id, id),
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    return toNotificationPreferences(user);
+  }
+
+  /**
+   * Flips one or more toggles.
+   *
+   * A partial update, so tapping one switch sends one field. An empty body
+   * is a no-op read rather than an error — it costs nothing and spares the
+   * client from having to care whether anything actually changed.
+   */
+  async updateNotificationPreferences(
+    id: string,
+    input: UpdateNotificationPreferencesInput,
+  ): Promise<NotificationPreferences> {
+    const changes = {
+      ...(input.memories === undefined
+        ? {}
+        : { notifyMemories: input.memories }),
+      ...(input.comments === undefined
+        ? {}
+        : { notifyComments: input.comments }),
+      ...(input.versions === undefined
+        ? {}
+        : { notifyVersions: input.versions }),
+      ...(input.invites === undefined ? {} : { notifyInvites: input.invites }),
+      ...(input.gifts === undefined ? {} : { notifyGifts: input.gifts }),
+    };
+
+    if (Object.keys(changes).length === 0) {
+      return this.notificationPreferences(id);
+    }
+
+    const [updated] = await this.db
+      .update(users)
+      .set({ ...changes, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    if (!updated) {
+      throw new NotFoundException('User not found');
+    }
+    return toNotificationPreferences(updated);
+  }
 
   /**
    * How much of their allowance this person has spent (Screen 36's storage
@@ -132,4 +185,28 @@ export class UsersService {
       updatedAt: row.updatedAt.toISOString(),
     };
   }
+}
+
+/**
+ * Column names to API names.
+ *
+ * The DB says `notify_memories` because a boolean column reads better with a
+ * verb; the API says `memories` because it is already inside a
+ * `notificationPreferences` object and repeating the word is noise. One
+ * mapper, so the two never drift.
+ */
+function toNotificationPreferences(user: {
+  notifyMemories: boolean;
+  notifyComments: boolean;
+  notifyVersions: boolean;
+  notifyInvites: boolean;
+  notifyGifts: boolean;
+}): NotificationPreferences {
+  return {
+    memories: user.notifyMemories,
+    comments: user.notifyComments,
+    versions: user.notifyVersions,
+    invites: user.notifyInvites,
+    gifts: user.notifyGifts,
+  };
 }

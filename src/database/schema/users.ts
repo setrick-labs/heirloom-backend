@@ -1,4 +1,5 @@
 import {
+  boolean,
   pgTable,
   uuid,
   varchar,
@@ -73,6 +74,21 @@ export const users = pgTable(
     // locking someone out of their whole account.
     vaultFailedAttempts: integer('vault_failed_attempts').notNull().default(0),
     vaultLockedUntil: timestamp('vault_locked_until', { withTimezone: true }),
+
+    // Push notification preferences — one column per category on the
+    // Notifications screen (Screen 36). Deliberately columns on `users`
+    // rather than a preferences table or a jsonb blob: the set is fixed by
+    // that screen, every send path reads them alongside the user row it has
+    // already loaded, and a typed boolean cannot drift into a string the way
+    // a jsonb key silently can.
+    //
+    // All default true — someone who has just installed the app has not
+    // opted out of anything, and the OS permission prompt is the real gate.
+    notifyMemories: boolean('notify_memories').notNull().default(true),
+    notifyComments: boolean('notify_comments').notNull().default(true),
+    notifyVersions: boolean('notify_versions').notNull().default(true),
+    notifyInvites: boolean('notify_invites').notNull().default(true),
+    notifyGifts: boolean('notify_gifts').notNull().default(true),
 
     ...timestamps,
   },

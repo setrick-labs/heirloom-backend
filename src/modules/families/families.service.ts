@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { and, count, eq, gt, inArray, isNull, ne, or } from 'drizzle-orm';
@@ -18,6 +19,7 @@ import {
   families,
   users,
 } from '../../database/schema';
+import { NotificationService } from '../../shared/services/notification.service';
 import { StorageService } from '../../shared/services/storage.service';
 import { generateNumericCode } from '../../shared/utils/auth-tokens.util';
 import {
@@ -44,9 +46,12 @@ const INVITE_CODE_MAX_ATTEMPTS = 10;
 
 @Injectable()
 export class FamiliesService {
+  private readonly logger = new Logger(FamiliesService.name);
+
   constructor(
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly storageService: StorageService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async create(ownerId: string, input: CreateFamilyInput): Promise<Family> {
@@ -547,6 +552,11 @@ export class FamiliesService {
           .set({ activeFamilyId: invite.familyId })
           .where(eq(users.id, userId));
       });
+
+      // Only on a genuine first join — the idempotent branch below is
+      // someone re-entering a family they are already in, which is not news
+      // to anybody.
+      void this.announceJoin(userId, invite.familyId);
     } else {
       // Idempotent: joining twice (or via two invite paths) just drops them
       // into the family, no error, no duplicate membership.
@@ -557,6 +567,26 @@ export class FamiliesService {
     }
 
     return this.findById(invite.familyId);
+  }
+
+  /** "Sam joined the family" — to everyone already in it. */
+  private async announceJoin(userId: string, familyId: string): Promise<void> {
+    try {
+      const [family, actor] = await Promise.all([
+        this.db.query.families.findFirst({ where: eq(families.id, familyId) }),
+        this.db.query.users.findFirst({ where: eq(users.id, userId) }),
+      ]);
+      if (!family || !actor) return;
+
+      await this.notificationService.pushFamilyJoin({
+        actorId: userId,
+        actorName: actor.name,
+        familyId,
+        familyName: family.name,
+      });
+    } catch (error) {
+      this.logger.error(`Failed to announce family join: ${error}`);
+    }
   }
 
   private async softDelete(familyId: string): Promise<Family> {

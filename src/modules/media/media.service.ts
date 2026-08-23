@@ -5,11 +5,19 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull } from 'drizzle-orm';
 
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
-import { comments, media, milestones, reactions } from '../../database/schema';
+import {
+  comments,
+  journeys,
+  media,
+  milestones,
+  reactions,
+  users,
+} from '../../database/schema';
+import { NotificationService } from '../../shared/services/notification.service';
 import { StorageKeys } from '../../shared/services/storage-keys.util';
 import { StorageService } from '../../shared/services/storage.service';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
@@ -34,6 +42,15 @@ export interface RequestUploadUrlResult {
 
 const UPLOAD_URL_TTL_SECONDS = 300;
 
+/**
+ * How far back to look when counting "this upload" as one event.
+ *
+ * Long enough to cover a slow multi-file upload on a bad connection, short
+ * enough that two genuinely separate visits to the same stop read as two
+ * events rather than one running total.
+ */
+const BATCH_WINDOW_MS = 10 * 60 * 1000;
+
 @Injectable()
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
@@ -42,6 +59,7 @@ export class MediaService {
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly storageService: StorageService,
     private readonly mediaProcessingService: MediaProcessingService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -195,7 +213,68 @@ export class MediaService {
       created.storageKey,
       input.type,
     );
+
+    // Also fire-and-forget, and for a stronger reason than speed: the upload
+    // has already succeeded, so nothing about announcing it may be allowed to
+    // fail it. A comment attachment (no milestone) is not a memory and
+    // announces nothing.
+    if (input.milestoneId) {
+      void this.announceNewMemory(ownerId, input.milestoneId);
+    }
+
     return this.toDto(created);
+  }
+
+  /**
+   * "Maya added 3 memories" to everyone else who can see the Journey.
+   *
+   * The count is re-read rather than tracked, because the client registers
+   * one media row per file: a ten-photo upload arrives here ten times, and
+   * counting the uploader's recent rows is what turns that back into the one
+   * event a person actually experienced. Paired with the collapse id in
+   * NotificationService, each new file replaces the previous notification
+   * instead of adding to a pile.
+   */
+  private async announceNewMemory(
+    ownerId: string,
+    milestoneId: string,
+  ): Promise<void> {
+    try {
+      const milestone = await this.db.query.milestones.findFirst({
+        where: eq(milestones.id, milestoneId),
+      });
+      if (!milestone) return;
+
+      const [journey, actor] = await Promise.all([
+        this.db.query.journeys.findFirst({
+          where: eq(journeys.id, milestone.journeyId),
+        }),
+        this.db.query.users.findFirst({ where: eq(users.id, ownerId) }),
+      ]);
+      if (!journey || !actor) return;
+
+      const [recent] = await this.db
+        .select({ value: count() })
+        .from(media)
+        .where(
+          and(
+            eq(media.ownerId, ownerId),
+            eq(media.milestoneId, milestoneId),
+            gte(media.createdAt, new Date(Date.now() - BATCH_WINDOW_MS)),
+          ),
+        );
+
+      await this.notificationService.pushNewMemory({
+        actorId: ownerId,
+        actorName: actor.name,
+        journeyId: journey.id,
+        journeyTitle: journey.title,
+        milestoneId,
+        count: recent?.value ?? 1,
+      });
+    } catch (error) {
+      this.logger.error(`Failed to announce new memory: ${error}`);
+    }
   }
 
   /**

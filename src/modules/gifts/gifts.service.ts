@@ -230,6 +230,14 @@ export class GiftsService {
         sender.name,
         journey.title,
       );
+      // Both, not either: the email is the durable record and survives an
+      // uninstall, while the push is what gets noticed on the day itself.
+      await this.notificationService.pushGiftUnlocked({
+        recipientId: recipient.id,
+        senderName: sender.name,
+        journeyTitle: journey.title,
+        giftId: gift.id,
+      });
     } else {
       await this.db
         .update(gifts)

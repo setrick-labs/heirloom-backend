@@ -1,9 +1,10 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
-import { reactions } from '../../database/schema';
+import { media, reactions, users } from '../../database/schema';
+import { NotificationService } from '../../shared/services/notification.service';
 import { requireTargetAccess } from '../../shared/utils/media-access.util';
 import {
   AddReactionInput,
@@ -14,7 +15,12 @@ import {
 
 @Injectable()
 export class ReactionsService {
-  constructor(@Inject(DATABASE_CONNECTION) private readonly db: Database) {}
+  private readonly logger = new Logger(ReactionsService.name);
+
+  constructor(
+    @Inject(DATABASE_CONNECTION) private readonly db: Database,
+    private readonly notificationService: NotificationService,
+  ) {}
 
   /**
    * Idempotent add — Section 5 recommends allowing multiple reaction types
@@ -29,7 +35,7 @@ export class ReactionsService {
       input.targetType,
       input.targetId,
     );
-    await this.db
+    const inserted = await this.db
       .insert(reactions)
       .values({
         targetType: input.targetType,
@@ -37,7 +43,47 @@ export class ReactionsService {
         userId,
         emoji: input.emoji,
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning();
+
+    // Nothing returned means the same person had already left the same emoji
+    // on the same thing. Re-notifying on a no-op would let anyone ping a
+    // photo's owner repeatedly by tapping a reaction they had already left.
+    if (inserted.length > 0) {
+      void this.announceReaction(userId, input);
+    }
+  }
+
+  /**
+   * Tells the owner of the memory, and nobody else.
+   *
+   * Reactions on comments ('comment' targets) stay silent by design: liking
+   * a reply is the lightest possible acknowledgement, and turning it into a
+   * push would make the quietest gesture in the app the loudest.
+   */
+  private async announceReaction(
+    userId: string,
+    input: AddReactionInput,
+  ): Promise<void> {
+    try {
+      if (input.targetType !== 'media') return;
+
+      const [target, actor] = await Promise.all([
+        this.db.query.media.findFirst({ where: eq(media.id, input.targetId) }),
+        this.db.query.users.findFirst({ where: eq(users.id, userId) }),
+      ]);
+      if (!target || !actor) return;
+
+      await this.notificationService.pushReaction({
+        actorId: userId,
+        actorName: actor.name,
+        ownerId: target.ownerId,
+        mediaId: input.targetId,
+        emoji: input.emoji,
+      });
+    } catch (error) {
+      this.logger.error(`Failed to announce reaction: ${error}`);
+    }
   }
 
   async remove(

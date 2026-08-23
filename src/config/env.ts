@@ -174,6 +174,17 @@ export const envSchema = z.object({
   // deployment that can already send mail at all.
   SUPPORT_EMAIL: optionalString(z.string().min(1)),
 
+  // Push notifications (OneSignal). Optional as a group, exactly like SMTP
+  // above: with these unset PushService logs what it would have sent instead
+  // of sending it, so every notification trigger stays testable locally with
+  // no OneSignal account and no device.
+  //
+  // ONESIGNAL_REST_API_KEY is a server secret — it can send a push to every
+  // user of the app — and must never be given to the client. The app only
+  // ever needs the App ID, which it carries as EXPO_PUBLIC_ONESIGNAL_APP_ID.
+  ONESIGNAL_APP_ID: optionalString(z.string().min(1)),
+  ONESIGNAL_REST_API_KEY: optionalString(z.string().min(1)),
+
   // Base URL for links the app deep-links back into — gift invites
   // (Screen 40's "See Your Gift" CTA) build on this. Optional: without it
   // the email still explains the gift, it just can't offer a one-tap link.

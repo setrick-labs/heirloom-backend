@@ -58,3 +58,33 @@ export const switchActiveFamilyInputSchema = z.object({
 export type SwitchActiveFamilyInput = z.infer<
   typeof switchActiveFamilyInputSchema
 >;
+
+/**
+ * The five toggles on the Notifications screen (Screen 36).
+ *
+ * Every field is required on read and optional on write, so the app can
+ * flip one switch without echoing back the other four — a PATCH that had to
+ * send the whole set would race with itself the moment someone taps two
+ * toggles quickly.
+ */
+export const notificationPreferencesSchema = z.object({
+  /** New memories in a Journey you can see. */
+  memories: z.boolean(),
+  /** Comments and reactions on your memories. */
+  comments: z.boolean(),
+  /** Someone adding their own version of your photo. */
+  versions: z.boolean(),
+  /** Family membership changes. */
+  invites: z.boolean(),
+  /** A gift you sent or received unlocking. */
+  gifts: z.boolean(),
+});
+export type NotificationPreferences = z.infer<
+  typeof notificationPreferencesSchema
+>;
+
+export const updateNotificationPreferencesInputSchema =
+  notificationPreferencesSchema.partial();
+export type UpdateNotificationPreferencesInput = z.infer<
+  typeof updateNotificationPreferencesInputSchema
+>;

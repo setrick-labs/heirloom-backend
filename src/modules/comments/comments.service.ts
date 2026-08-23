@@ -2,15 +2,17 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
-import { comments, reactions } from '../../database/schema';
+import { comments, media, reactions, users } from '../../database/schema';
 import { MediaService } from '../media/media.service';
 import type { Media } from '../media/validations/media.schema';
+import { NotificationService } from '../../shared/services/notification.service';
 import { requireTargetAccess } from '../../shared/utils/media-access.util';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
 import {
@@ -25,9 +27,12 @@ import {
 
 @Injectable()
 export class CommentsService {
+  private readonly logger = new Logger(CommentsService.name);
+
   constructor(
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly mediaService: MediaService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /** Anyone with visibility into the target's journey — not owner-gated. */
@@ -54,8 +59,12 @@ export class CommentsService {
       if (!attachment) {
         throw new NotFoundException('Attachment not found');
       }
-      if (!(await isActiveFamilyMember(this.db, authorId, attachment.familyId))) {
-        throw new ForbiddenException("You don't have access to that attachment");
+      if (
+        !(await isActiveFamilyMember(this.db, authorId, attachment.familyId))
+      ) {
+        throw new ForbiddenException(
+          "You don't have access to that attachment",
+        );
       }
     }
 
@@ -71,11 +80,68 @@ export class CommentsService {
         parentId: input.parentId ?? null,
       })
       .returning();
+    // The comment is written; announcing it must not be able to fail it.
+    void this.announceComment(authorId, created);
+
     return this.toDto(authorId, created, {
       replyCount: 0,
       reactions: [],
       attachment,
     });
+  }
+
+  /**
+   * Tells the people this comment is actually addressed to.
+   *
+   * Deliberately *not* the journey audience. A comment is a reply to
+   * something someone made: it reaches the memory's owner, plus the author
+   * of the comment being replied to. Broadcasting every comment to the whole
+   * family is how a notification setting ends up switched off for good.
+   *
+   * Only 'media' targets notify. The target type is polymorphic for
+   * historical reasons, but the client only ever comments on a single
+   * image/video (see commentTargetTypeSchema), and there is no screen a
+   * milestone-level comment notification could sensibly open.
+   */
+  private async announceComment(
+    authorId: string,
+    created: typeof comments.$inferSelect,
+  ): Promise<void> {
+    try {
+      if (created.targetType !== 'media') return;
+
+      const [target, author] = await Promise.all([
+        this.db.query.media.findFirst({
+          where: eq(media.id, created.targetId),
+        }),
+        this.db.query.users.findFirst({ where: eq(users.id, authorId) }),
+      ]);
+      if (!target || !author) return;
+
+      const recipientIds = [target.ownerId];
+
+      if (created.parentId) {
+        const parent = await this.db.query.comments.findFirst({
+          where: eq(comments.id, created.parentId),
+        });
+        // Whoever is being replied to hears about it even when the memory
+        // is someone else's — otherwise a reply reaches everyone but the
+        // person it answers.
+        if (parent) recipientIds.push(parent.authorId);
+      }
+
+      await this.notificationService.pushComment({
+        actorId: authorId,
+        actorName: author.name,
+        recipientIds,
+        mediaId: created.targetId,
+        body: created.body,
+        commentType: created.type,
+        isReply: Boolean(created.parentId),
+      });
+    } catch (error) {
+      this.logger.error(`Failed to announce comment: ${error}`);
+    }
   }
 
   /**
@@ -92,7 +158,9 @@ export class CommentsService {
       where: eq(comments.id, input.parentId!),
     });
     if (!parent) {
-      throw new NotFoundException('The comment being replied to no longer exists');
+      throw new NotFoundException(
+        'The comment being replied to no longer exists',
+      );
     }
     if (
       parent.targetType !== input.targetType ||
@@ -150,7 +218,8 @@ export class CommentsService {
     const reactionsByComment = new Map<string, Map<string, ReactionEntry>>();
     for (const row of reactionRows) {
       const byEmoji =
-        reactionsByComment.get(row.targetId) ?? new Map<string, ReactionEntry>();
+        reactionsByComment.get(row.targetId) ??
+        new Map<string, ReactionEntry>();
       const entry = byEmoji.get(row.emoji) ?? {
         count: 0,
         reactedByMe: false,

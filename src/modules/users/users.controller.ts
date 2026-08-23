@@ -9,6 +9,8 @@ import { UsersService } from './users.service';
 import {
   type SwitchActiveFamilyInput,
   switchActiveFamilyInputSchema,
+  type UpdateNotificationPreferencesInput,
+  updateNotificationPreferencesInputSchema,
   type UpdateUserInput,
   updateUserInputSchema,
 } from './validations/user.schema';
@@ -26,6 +28,21 @@ export class UsersController {
   @Get('me/storage')
   getMyStorage(@CurrentUser() user: AuthenticatedUser) {
     return this.usersService.storageUsage(user.id);
+  }
+
+  /** The five push toggles behind Screen 36's Notifications row. */
+  @Get('me/notification-preferences')
+  getMyNotificationPreferences(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.notificationPreferences(user.id);
+  }
+
+  @Patch('me/notification-preferences')
+  updateMyNotificationPreferences(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(updateNotificationPreferencesInputSchema))
+    body: UpdateNotificationPreferencesInput,
+  ) {
+    return this.usersService.updateNotificationPreferences(user.id, body);
   }
 
   @Patch('me')
