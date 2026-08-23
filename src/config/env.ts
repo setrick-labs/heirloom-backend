@@ -57,7 +57,8 @@ export const envSchema = z.object({
    * Defaults to on in production, so the safe thing still happens by default.
    */
   DATABASE_SSL: z.preprocess(
-    (value) => (value === '' || value === undefined ? undefined : value === 'true'),
+    (value) =>
+      value === '' || value === undefined ? undefined : value === 'true',
     z.boolean().optional(),
   ),
 
@@ -90,6 +91,21 @@ export const envSchema = z.object({
   // AWS S3; set true for SeaweedFS.
   S3_FORCE_PATH_STYLE: booleanString(false),
   S3_BUCKET_NAME: optionalString(z.string().min(1)),
+
+  // Per-person storage allowance, in bytes. Counts everything a user owns
+  // that we have a size for: family-shared media rows plus their private
+  // Vault items. Enforced when an upload URL is requested (see
+  // shared/utils/storage-quota.util.ts) — the same point the per-file size
+  // caps are enforced, and the only point we control, since a presigned PUT
+  // goes straight to R2 without touching this server.
+  //
+  // Default is 30 GiB. Configurable rather than hard-coded so a plan change
+  // is a deploy setting, not a release.
+  USER_STORAGE_QUOTA_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30 * 1024 * 1024 * 1024),
 
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
@@ -152,6 +168,11 @@ export const envSchema = z.object({
   // The From: header. Must be an address the SMTP account is allowed to send
   // as, or most providers will reject the message outright.
   MAIL_FROM: optionalString(z.string().min(1)),
+
+  // Where in-app support requests (POST /support) are delivered. Falls back
+  // to MAIL_FROM when unset, so the feature works out of the box on any
+  // deployment that can already send mail at all.
+  SUPPORT_EMAIL: optionalString(z.string().min(1)),
 
   // Base URL for links the app deep-links back into — gift invites
   // (Screen 40's "See Your Gift" CTA) build on this. Optional: without it

@@ -16,6 +16,7 @@ import type { Database } from '../../database/connection';
 import { users, vaultItems } from '../../database/schema';
 import { StorageKeys } from '../../shared/services/storage-keys.util';
 import { StorageService } from '../../shared/services/storage.service';
+import { assertStorageQuota } from '../../shared/utils/storage-quota.util';
 import { assertValidMediaUpload } from '../media/media-upload-policy';
 import type { RequestUploadUrlResult } from '../media/media.service';
 import {
@@ -187,6 +188,9 @@ export class VaultService {
     sizeBytes: number,
   ): Promise<RequestUploadUrlResult> {
     const extension = assertValidMediaUpload(contentType, sizeBytes);
+    // The Vault is private, but it is not free: it draws on the same
+    // per-person allowance as everything else the user owns.
+    await assertStorageQuota(this.db, userId, sizeBytes);
     const key = StorageKeys.vaultItem({ userId, extension });
     const uploadUrl = await this.storageService.generatePresignedUploadUrl(
       key,

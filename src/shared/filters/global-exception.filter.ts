@@ -123,6 +123,23 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       };
     }
 
+    // Multer rejects an oversized or malformed multipart upload by throwing
+    // its own error type, which is not an HttpException — without this it
+    // would surface as a 500 on a request the client got wrong. Matched by
+    // name rather than by `instanceof` so this file doesn't have to depend on
+    // multer, which is a transitive dependency of @nestjs/platform-express.
+    if (exception instanceof Error && exception.name === 'MulterError') {
+      const code = (exception as Error & { code?: string }).code;
+      return {
+        status: HttpStatus.BAD_REQUEST,
+        code: code === 'LIMIT_FILE_SIZE' ? 'FILE_TOO_LARGE' : 'INVALID_UPLOAD',
+        message:
+          code === 'LIMIT_FILE_SIZE'
+            ? 'That file is too large.'
+            : `That upload was rejected: ${exception.message}`,
+      };
+    }
+
     if (exception instanceof ZodError) {
       const message = exception.issues
         .map((issue) => `${issue.path.join('.')}: ${issue.message}`)

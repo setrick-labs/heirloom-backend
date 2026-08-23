@@ -15,6 +15,7 @@ import { StorageService } from '../../shared/services/storage.service';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
 import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
 import { requireMediaOwner } from '../../shared/utils/media-access.util';
+import { assertStorageQuota } from '../../shared/utils/storage-quota.util';
 import { MediaProcessingService } from './media-processing.service';
 import { assertValidMediaUpload } from './media-upload-policy';
 import {
@@ -64,6 +65,7 @@ export class MediaService {
       input.contentType,
       input.sizeBytes,
     );
+    await assertStorageQuota(this.db, userId, input.sizeBytes);
     const key = StorageKeys.journeyMedia({
       familyId: input.familyId,
       journeyId: input.journeyId,
@@ -128,6 +130,7 @@ export class MediaService {
       input.contentType,
       input.sizeBytes,
     );
+    await assertStorageQuota(this.db, userId, input.sizeBytes);
     const key = StorageKeys.commentAttachment({
       familyId: input.familyId,
       extension,

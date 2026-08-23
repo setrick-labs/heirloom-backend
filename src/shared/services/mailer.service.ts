@@ -17,6 +17,18 @@ export interface OutboundEmail {
    * ships to. Callers name the message instead.
    */
   logLabel: string;
+  /**
+   * Optional binary attachments. Only the support form uses these today (a
+   * screenshot); every transactional email is deliberately text-only, since
+   * attachments are the fastest way to land a verification code in spam.
+   */
+  attachments?: OutboundAttachment[];
+}
+
+export interface OutboundAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
 }
 
 /**
@@ -73,8 +85,11 @@ export class MailerService {
       // The full message, code and all, is intentional here: with no provider
       // configured this log IS the delivery mechanism, and the flow has to
       // stay testable locally. It never runs once SMTP is set up.
+      const attached = email.attachments?.length
+        ? ` (+${email.attachments.length} attachment(s), not written to disk)`
+        : '';
       this.logger.warn(
-        `[email NOT sent — no SMTP configured] To ${email.to} — ${email.subject}\n${email.body}`,
+        `[email NOT sent — no SMTP configured] To ${email.to} — ${email.subject}${attached}\n${email.body}`,
       );
       return false;
     }
@@ -85,6 +100,7 @@ export class MailerService {
         to: email.to,
         subject: email.subject,
         text: email.body,
+        attachments: email.attachments,
       });
       this.logger.log(`Sent ${email.logLabel} to ${email.to}`);
       return true;

@@ -22,6 +22,12 @@ export class UsersController {
     return this.usersService.findById(user.id);
   }
 
+  /** Storage allowance: what they've used of their 30GB, and what's left. */
+  @Get('me/storage')
+  getMyStorage(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.storageUsage(user.id);
+  }
+
   @Patch('me')
   updateMe(
     @CurrentUser() user: AuthenticatedUser,

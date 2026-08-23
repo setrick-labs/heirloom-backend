@@ -18,6 +18,7 @@ import { MediaModule } from './modules/media/media.module';
 import { MilestonesModule } from './modules/milestones/milestones.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { SearchModule } from './modules/search/search.module';
+import { SupportModule } from './modules/support/support.module';
 import { UsersModule } from './modules/users/users.module';
 import { VaultModule } from './modules/vault/vault.module';
 import { ViewsModule } from './modules/views/views.module';
@@ -75,6 +76,7 @@ import { SharedModule } from './shared/shared.module';
     CommentsModule,
     ReactionsModule,
     SearchModule,
+    SupportModule,
     VaultModule,
     GiftsModule,
     ViewsModule,

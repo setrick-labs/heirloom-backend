@@ -17,6 +17,10 @@ import {
   resolveActiveFamilyId,
 } from '../../shared/utils/family-membership.util';
 import {
+  getUserStorageUsage,
+  type StorageUsage,
+} from '../../shared/utils/storage-quota.util';
+import {
   SwitchActiveFamilyInput,
   UpdateUserInput,
   User,
@@ -28,6 +32,15 @@ export class UsersService {
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly storageService: StorageService,
   ) {}
+
+  /**
+   * How much of their allowance this person has spent (Screen 36's storage
+   * row). Read live from the media/vault rows they own — see
+   * shared/utils/storage-quota.util.ts for why it isn't a stored counter.
+   */
+  async storageUsage(id: string): Promise<StorageUsage> {
+    return getUserStorageUsage(this.db, id);
+  }
 
   async findById(id: string): Promise<User> {
     const user = await this.db.query.users.findFirst({
