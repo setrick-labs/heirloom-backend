@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
@@ -123,6 +124,26 @@ export class StorageService {
   async deleteObject(key: string): Promise<void> {
     const { client, bucket } = this.requireClient();
     await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  }
+
+  /**
+   * Server-side copy for a Vault ↔ Milestone move — the object relocates to
+   * the destination's key namespace without its bytes ever transiting this
+   * server (S3-compatible providers copy the object internally). The
+   * caller still owns deciding what happens to the source object
+   * afterwards; this never deletes it.
+   */
+  async copyObject(sourceKey: string, destinationKey: string): Promise<void> {
+    const { client, bucket } = this.requireClient();
+    await client.send(
+      new CopyObjectCommand({
+        Bucket: bucket,
+        // CopySource is `{bucket}/{key}`, with the key URI-encoded per the
+        // S3 API's own requirement — not the same encoding `Key` gets.
+        CopySource: `${bucket}/${encodeURIComponent(sourceKey)}`,
+        Key: destinationKey,
+      }),
+    );
   }
 
   /**

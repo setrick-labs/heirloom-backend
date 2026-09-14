@@ -5,6 +5,7 @@ import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
 import { media, reactions, users } from '../../database/schema';
 import { NotificationService } from '../../shared/services/notification.service';
+import { NotificationsGateway } from '../../shared/services/notifications.gateway';
 import { requireTargetAccess } from '../../shared/utils/media-access.util';
 import {
   AddReactionInput,
@@ -20,6 +21,7 @@ export class ReactionsService {
   constructor(
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly notificationService: NotificationService,
+    private readonly notificationsGateway: NotificationsGateway,
   ) {}
 
   /**
@@ -50,6 +52,7 @@ export class ReactionsService {
     // on the same thing. Re-notifying on a no-op would let anyone ping a
     // photo's owner repeatedly by tapping a reaction they had already left.
     if (inserted.length > 0) {
+      this.notificationsGateway.emitActivity(input.targetType, input.targetId);
       void this.announceReaction(userId, input);
     }
   }

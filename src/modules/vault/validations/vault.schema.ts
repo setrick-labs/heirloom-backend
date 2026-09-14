@@ -77,3 +77,11 @@ export const createVaultItemInputSchema = z.object({
   sizeBytes: mediaSchema.shape.sizeBytes,
 });
 export type CreateVaultItemInput = z.infer<typeof createVaultItemInputSchema>;
+
+/** Vault → Milestone: see VaultService.moveToMilestone. */
+export const moveVaultItemToMilestoneInputSchema = z.object({
+  milestoneId: idSchema,
+});
+export type MoveVaultItemToMilestoneInput = z.infer<
+  typeof moveVaultItemToMilestoneInputSchema
+>;

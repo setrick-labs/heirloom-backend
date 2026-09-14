@@ -113,6 +113,13 @@
       "when": 1787494779125,
       "tag": "0015_skinny_thunderbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1789382111290,
+      "tag": "0016_daffy_maestro",
+      "breakpoints": true
     }
   ]
 }

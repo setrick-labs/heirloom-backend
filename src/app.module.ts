@@ -16,6 +16,7 @@ import { RootModule } from './modules/root/root.module';
 import { JourneysModule } from './modules/journeys/journeys.module';
 import { MediaModule } from './modules/media/media.module';
 import { MilestonesModule } from './modules/milestones/milestones.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { SearchModule } from './modules/search/search.module';
 import { SupportModule } from './modules/support/support.module';
@@ -75,6 +76,7 @@ import { SharedModule } from './shared/shared.module';
     MediaModule,
     CommentsModule,
     ReactionsModule,
+    NotificationsModule,
     SearchModule,
     SupportModule,
     VaultModule,

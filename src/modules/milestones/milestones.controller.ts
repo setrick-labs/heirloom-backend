@@ -24,6 +24,8 @@ import {
   moveMilestoneInputSchema,
   type RenameMilestoneInput,
   renameMilestoneInputSchema,
+  type SetCoverFromMediaInput,
+  setCoverFromMediaInputSchema,
 } from './validations/milestone.schema';
 
 @Controller('milestones')
@@ -63,6 +65,22 @@ export class MilestonesController {
   ) {
     const milestone = await this.milestonesService.rename(user.id, id, body);
     return apiResponse(milestone, 'Milestone renamed');
+  }
+
+  /** Section 8: creator or journey owner — same gate as rename. */
+  @Post(':id/cover')
+  async setCoverFromMedia(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(setCoverFromMediaInputSchema))
+    body: SetCoverFromMediaInput,
+  ) {
+    const milestone = await this.milestonesService.setCoverFromMedia(
+      user.id,
+      id,
+      body.mediaId,
+    );
+    return apiResponse(milestone, 'Cover updated');
   }
 
   /**

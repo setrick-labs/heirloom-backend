@@ -14,11 +14,13 @@ import {
 } from '../../shared/guards/current-user.decorator';
 import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
 import { apiResponse } from '../../shared/types/api-response';
-import { VaultAccessGuard } from './vault-access.guard';
+import { VaultAccessGuard } from '../../shared/guards/vault-access.guard';
 import { VaultService } from './vault.service';
 import {
   type CreateVaultItemInput,
   createVaultItemInputSchema,
+  type MoveVaultItemToMilestoneInput,
+  moveVaultItemToMilestoneInputSchema,
   type RecoverVaultInput,
   recoverVaultInputSchema,
   type RequestVaultUploadUrlInput,
@@ -111,5 +113,21 @@ export class VaultController {
   ) {
     await this.vaultService.deleteItem(user.id, id);
     return apiResponse('Removed from Vault');
+  }
+
+  @UseGuards(VaultAccessGuard)
+  @Post('items/:id/move-to-milestone')
+  async moveToMilestone(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(moveVaultItemToMilestoneInputSchema))
+    body: MoveVaultItemToMilestoneInput,
+  ) {
+    const media = await this.vaultService.moveToMilestone(
+      user.id,
+      id,
+      body.milestoneId,
+    );
+    return apiResponse(media, 'Moved to milestone');
   }
 }

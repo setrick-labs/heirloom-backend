@@ -12,7 +12,7 @@ import { env } from '../../config/env';
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
 import { users } from '../../database/schema';
-import type { AuthenticatedUser } from '../../shared/guards/current-user.decorator';
+import type { AuthenticatedUser } from './current-user.decorator';
 
 interface VaultTokenPayload {
   sub: string;

@@ -7,6 +7,7 @@ import {
   Post,
   Query,
   Body,
+  UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 
@@ -14,6 +15,7 @@ import {
   type AuthenticatedUser,
   CurrentUser,
 } from '../../shared/guards/current-user.decorator';
+import { VaultAccessGuard } from '../../shared/guards/vault-access.guard';
 import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
 import { apiResponse } from '../../shared/types/api-response';
 import { idSchema } from '../../shared/validations/common.schema';
@@ -123,5 +125,22 @@ export class MediaController {
   ) {
     await this.mediaService.delete(user.id, id);
     return apiResponse('Media removed');
+  }
+
+  /**
+   * Uploader-only (same gate as delete), and — since the destination is the
+   * Vault — also requires a valid vault token, exactly like every route
+   * under /vault/items. Reading/writing the Vault never inherits trust from
+   * the main app session alone, and a move into it is a write to the Vault
+   * regardless of which controller the request happened to arrive through.
+   */
+  @UseGuards(VaultAccessGuard)
+  @Post(':id/move-to-vault')
+  async moveToVault(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    const item = await this.mediaService.moveToVault(user.id, id);
+    return apiResponse(item, 'Moved to Vault');
   }
 }

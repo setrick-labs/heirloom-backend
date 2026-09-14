@@ -17,6 +17,7 @@ import {
   buildGiftUnlockedEmail,
 } from './gift-email.template';
 import { MailerService } from './mailer.service';
+import { NotificationFeedService } from './notification-feed.service';
 import {
   buildCommentPush,
   buildFamilyJoinPush,
@@ -47,6 +48,7 @@ export class NotificationService {
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly mailer: MailerService,
     private readonly push: PushService,
+    private readonly notificationFeed: NotificationFeedService,
   ) {}
 
   /**
@@ -221,23 +223,39 @@ export class NotificationService {
     isReply: boolean;
   }): Promise<void> {
     const recipients = input.recipientIds.filter((id) => id !== input.actorId);
+    if (recipients.length === 0) return;
 
-    if (input.commentType === 'version') {
-      await this.pushToAudience(
-        recipients,
-        'versions',
-        buildVersionPush(input),
-        'version',
-      );
-      return;
-    }
-
-    const content =
-      input.commentType === 'voice'
+    const isVersion = input.commentType === 'version';
+    const content = isVersion
+      ? buildVersionPush(input)
+      : input.commentType === 'voice'
         ? buildVoiceCommentPush(input)
         : buildCommentPush({ ...input, body: input.body ?? '' });
 
-    await this.pushToAudience(recipients, 'comments', content, 'comment');
+    await this.pushToAudience(
+      recipients,
+      isVersion ? 'versions' : 'comments',
+      content,
+      isVersion ? 'version' : 'comment',
+    );
+
+    // The bell's durable record of the same event — see notification-feed
+    // .service.ts. Reuses the exact copy the push just used rather than
+    // recomputing it, so the two never drift.
+    await Promise.all(
+      recipients.map((recipientId) =>
+        this.notificationFeed.record({
+          recipientId,
+          actorId: input.actorId,
+          type: 'comment',
+          targetType: 'media',
+          targetId: input.mediaId,
+          mediaId: input.mediaId,
+          title: content.title,
+          body: content.body,
+        }),
+      ),
+    );
   }
 
   /** A reaction on your memory. Shares the 'comments' preference — the toggle reads "Comments and reactions". */
@@ -250,12 +268,19 @@ export class NotificationService {
   }): Promise<void> {
     if (input.ownerId === input.actorId) return;
 
-    await this.pushToAudience(
-      [input.ownerId],
-      'comments',
-      buildReactionPush(input),
-      'reaction',
-    );
+    const content = buildReactionPush(input);
+    await this.pushToAudience([input.ownerId], 'comments', content, 'reaction');
+
+    await this.notificationFeed.record({
+      recipientId: input.ownerId,
+      actorId: input.actorId,
+      type: 'reaction',
+      targetType: 'media',
+      targetId: input.mediaId,
+      mediaId: input.mediaId,
+      title: content.title,
+      body: content.body,
+    });
   }
 
   /** Someone joined a family you're in. */

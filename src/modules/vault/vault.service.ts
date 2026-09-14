@@ -8,17 +8,19 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 
 import { env } from '../../config/env';
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
-import { users, vaultItems } from '../../database/schema';
+import { journeys, milestones, users, vaultItems } from '../../database/schema';
 import { StorageKeys } from '../../shared/services/storage-keys.util';
 import { StorageService } from '../../shared/services/storage.service';
+import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
 import { assertStorageQuota } from '../../shared/utils/storage-quota.util';
 import { assertValidMediaUpload } from '../media/media-upload-policy';
-import type { RequestUploadUrlResult } from '../media/media.service';
+import { MediaService, type RequestUploadUrlResult } from '../media/media.service';
+import type { Media } from '../media/validations/media.schema';
 import {
   CreateVaultItemInput,
   RecoverVaultInput,
@@ -35,6 +37,7 @@ export class VaultService {
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly jwtService: JwtService,
     private readonly storageService: StorageService,
+    private readonly mediaService: MediaService,
   ) {}
 
   async status(userId: string): Promise<VaultStatus> {
@@ -240,6 +243,73 @@ export class VaultService {
     } catch {
       // Best-effort — an orphaned R2 object is cheap, a stuck delete isn't.
     }
+  }
+
+  /**
+   * Vault → Milestone: the mirror image of MediaService.moveToVault.
+   *
+   * The object is copied into the destination Milestone's key namespace —
+   * `StorageKeys.journeyMedia`, not the Vault's own prefix — since the two
+   * are deliberately separate conventions (vault-items.ts). Once the copy
+   * exists there, the actual `media` row is created through
+   * `MediaService.create()` rather than by hand here: that's the one place
+   * a media row is ever written, and reusing it means this move announces
+   * itself exactly like an ordinary upload ("Maya added a memory") instead
+   * of arriving silently.
+   */
+  async moveToMilestone(
+    userId: string,
+    itemId: string,
+    milestoneId: string,
+  ): Promise<Media> {
+    const item = await this.db.query.vaultItems.findFirst({
+      where: eq(vaultItems.id, itemId),
+    });
+    if (!item || item.ownerId !== userId) {
+      throw new NotFoundException('Vault item not found');
+    }
+
+    const milestone = await this.db.query.milestones.findFirst({
+      where: and(eq(milestones.id, milestoneId), isNull(milestones.deletedAt)),
+    });
+    if (!milestone) {
+      throw new NotFoundException('Milestone not found');
+    }
+    // Same gate as adding any other memory to an existing Milestone —
+    // anyone with visibility into its journey, not just its creator.
+    await requireJourneyAccess(this.db, userId, milestone.journeyId);
+    const journey = await this.db.query.journeys.findFirst({
+      where: eq(journeys.id, milestone.journeyId),
+    });
+    if (!journey) {
+      throw new NotFoundException('Milestone not found');
+    }
+
+    const destinationKey = StorageKeys.journeyMedia({
+      familyId: journey.familyId,
+      journeyId: journey.id,
+      milestoneId: milestone.id,
+      extension: StorageKeys.extensionOf(item.storageKey),
+    });
+    await this.storageService.copyObject(item.storageKey, destinationKey);
+
+    const created = await this.mediaService.create(userId, {
+      familyId: journey.familyId,
+      milestoneId: milestone.id,
+      type: item.type,
+      key: destinationKey,
+      caption: item.caption,
+      sizeBytes: item.sizeBytes,
+    });
+
+    await this.db.delete(vaultItems).where(eq(vaultItems.id, item.id));
+    try {
+      await this.storageService.deleteObject(item.storageKey);
+    } catch {
+      // Best-effort — an orphaned R2 object is cheap, a stuck move isn't.
+    }
+
+    return created;
   }
 
   private async assertDistinctFromAccountPassword(

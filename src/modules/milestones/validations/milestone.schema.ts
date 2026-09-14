@@ -122,3 +122,14 @@ export const moveMilestoneInputSchema = z.object({
   journeyId: idSchema,
 });
 export type MoveMilestoneInput = z.infer<typeof moveMilestoneInputSchema>;
+
+/**
+ * Promoting one of this milestone's own memories to be its cover, in place
+ * of a fresh upload — see MilestonesService.setCoverFromMedia.
+ */
+export const setCoverFromMediaInputSchema = z.object({
+  mediaId: idSchema,
+});
+export type SetCoverFromMediaInput = z.infer<
+  typeof setCoverFromMediaInputSchema
+>;

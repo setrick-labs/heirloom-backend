@@ -88,4 +88,15 @@ export const StorageKeys = {
   hasUnrenderableExtension(key: string): boolean {
     return /\.(heic|heif)$/i.test(key);
   },
+
+  /**
+   * The extension off an existing key, for a move that carries the same
+   * bytes into a new namespace (Vault ↔ Milestone) rather than a fresh
+   * upload — there is no separately-declared content type to derive one
+   * from, only the key the object already has.
+   */
+  extensionOf(key: string): string {
+    const lastDot = key.lastIndexOf('.');
+    return lastDot === -1 ? '' : key.slice(lastDot + 1);
+  },
 };

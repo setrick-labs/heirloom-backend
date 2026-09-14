@@ -24,6 +24,8 @@ export const mediaSchema = z.object({
   sizeBytes: z.number().int().positive().nullable().optional(),
   /** Backs Screen 24's `💬 4` pill — the only pre-open signal a tile has a discussion. */
   commentCount: z.number().int().min(0).default(0),
+  /** Backs the `❤️ 4` pill — the only pre-open signal a tile has been liked. */
+  reactionCount: z.number().int().min(0).default(0),
   createdAt: isoDateTimeSchema,
 });
 export type Media = z.infer<typeof mediaSchema>;

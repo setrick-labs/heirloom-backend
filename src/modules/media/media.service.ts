@@ -16,6 +16,7 @@ import {
   milestones,
   reactions,
   users,
+  vaultItems,
 } from '../../database/schema';
 import { NotificationService } from '../../shared/services/notification.service';
 import { StorageKeys } from '../../shared/services/storage-keys.util';
@@ -24,6 +25,7 @@ import { isActiveFamilyMember } from '../../shared/utils/family-membership.util'
 import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
 import { requireMediaOwner } from '../../shared/utils/media-access.util';
 import { assertStorageQuota } from '../../shared/utils/storage-quota.util';
+import type { VaultItem } from '../vault/validations/vault.schema';
 import { MediaProcessingService } from './media-processing.service';
 import { assertValidMediaUpload } from './media-upload-policy';
 import {
@@ -328,14 +330,22 @@ export class MediaService {
   private async toDtoList(
     rows: (typeof media.$inferSelect)[],
   ): Promise<Media[]> {
-    const commentCounts = await this.countCommentsFor(rows.map((r) => r.id));
+    const ids = rows.map((r) => r.id);
+    const [commentCounts, reactionCounts] = await Promise.all([
+      this.countCommentsFor(ids),
+      this.countReactionsFor(ids),
+    ]);
     // toDto() throws for an image that's confirmed unrenderable (see
     // there) — one such item shouldn't 500 an entire list, so those are
     // dropped here rather than propagated.
     const dtos = await Promise.all(
       rows.map(async (row) => {
         try {
-          return await this.toDto(row, commentCounts.get(row.id) ?? 0);
+          return await this.toDto(
+            row,
+            commentCounts.get(row.id) ?? 0,
+            reactionCounts.get(row.id) ?? 0,
+          );
         } catch (error) {
           this.logger.warn(
             `Skipping unrenderable media ${row.id} in list: ${error}`,
@@ -361,8 +371,15 @@ export class MediaService {
       throw new NotFoundException('Media not found');
     }
     await requireJourneyAccess(this.db, userId, milestone.journeyId);
-    const counts = await this.countCommentsFor([row.id]);
-    return this.toDto(row, counts.get(row.id) ?? 0);
+    const [commentCounts, reactionCounts] = await Promise.all([
+      this.countCommentsFor([row.id]),
+      this.countReactionsFor([row.id]),
+    ]);
+    return this.toDto(
+      row,
+      commentCounts.get(row.id) ?? 0,
+      reactionCounts.get(row.id) ?? 0,
+    );
   }
 
   /**
@@ -400,21 +417,105 @@ export class MediaService {
     }
   }
 
+  /**
+   * Milestone → Vault: the mirror image of VaultService.moveToMilestone.
+   * Same uploader-only gate as `delete()` — moving something out from under
+   * a discussion someone else built is exactly as restricted as removing it
+   * outright, and the same reasoning applies (Milestones spec Section 8).
+   *
+   * The object is copied into the Vault's own key namespace rather than
+   * repointed in place: the two live under different prefixes
+   * (StorageKeys.journeyMedia vs .vaultItem) by design (see vault-items.ts
+   * — the Vault never shares a storage convention with shared content), so
+   * "moving" here means create-then-delete, not a rename.
+   *
+   * Only the original object comes along — thumbnail/display variants are
+   * dropped along with the `media` row they belonged to, since the Vault
+   * has no variant concept of its own (`vault/viewer.tsx` reads the
+   * original directly). A fresh set would only ever regenerate if the item
+   * moved back into a Milestone later, at which point moveToMilestone's own
+   * fire-and-forget processing pass produces new ones anyway.
+   */
+  async moveToVault(userId: string, mediaId: string): Promise<VaultItem> {
+    const row = await requireMediaOwner(this.db, userId, mediaId);
+
+    const destinationKey = StorageKeys.vaultItem({
+      userId,
+      extension: StorageKeys.extensionOf(row.storageKey),
+    });
+    await this.storageService.copyObject(row.storageKey, destinationKey);
+
+    const [item] = await this.db.transaction(async (tx) => {
+      // Same polymorphic cleanup `delete()` does — the Vault has no
+      // comment/reaction concept, so these can't travel with the row.
+      await tx
+        .delete(comments)
+        .where(
+          and(eq(comments.targetType, 'media'), eq(comments.targetId, mediaId)),
+        );
+      await tx
+        .delete(reactions)
+        .where(
+          and(
+            eq(reactions.targetType, 'media'),
+            eq(reactions.targetId, mediaId),
+          ),
+        );
+      await tx.delete(media).where(eq(media.id, mediaId));
+      return tx
+        .insert(vaultItems)
+        .values({
+          ownerId: userId,
+          type: row.type,
+          storageKey: destinationKey,
+          caption: row.caption,
+          sizeBytes: row.sizeBytes,
+        })
+        .returning();
+    });
+
+    try {
+      await this.storageService.deleteObject(row.storageKey);
+      if (row.thumbnailStorageKey) {
+        await this.storageService.deleteObject(row.thumbnailStorageKey);
+      }
+      if (row.displayStorageKey) {
+        await this.storageService.deleteObject(row.displayStorageKey);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to delete storage object(s) for moved media ${mediaId}: ${error}`,
+      );
+    }
+
+    return {
+      id: item.id,
+      type: item.type,
+      url: await this.resolveUrl(item.storageKey),
+      caption: item.caption,
+      sizeBytes: item.sizeBytes,
+      createdAt: item.createdAt.toISOString(),
+    };
+  }
+
   private async resolveUrl(storageKey: string): Promise<string> {
     return this.storageService.generatePresignedDownloadUrl(storageKey);
   }
 
   /**
-   * `commentCount` backs the small `💬 4` pill Screen 24 puts on any grid
-   * tile with an active discussion — it's the only signal a tile has one
-   * before you open it, so it has to come back with the tile itself rather
-   * than from a second per-tile request. Callers that have a batch of rows
-   * should pass a precomputed map (see countCommentsFor); it defaults to 0
-   * so single-row callers that genuinely don't need it stay simple.
+   * `commentCount`/`reactionCount` back the small `💬 4` / `❤️ 4` pills a
+   * grid tile puts on any memory with an active discussion or likes — the
+   * only signal a tile has either before you open it, so both have to come
+   * back with the tile itself rather than from a second per-tile request.
+   * Callers that have a batch of rows should pass precomputed maps (see
+   * countCommentsFor/countReactionsFor); both default to 0 so single-row
+   * callers that genuinely don't need them (a freshly created row, a
+   * comment's own attachment) stay simple.
    */
   private async toDto(
     row: typeof media.$inferSelect,
     commentCount = 0,
+    reactionCount = 0,
   ): Promise<Media> {
     // Falling back to the original is fine for most failure causes (a
     // transient fetch error, an oversized-but-valid PNG, processing that
@@ -458,6 +559,7 @@ export class MediaService {
       durationSeconds: row.durationSeconds,
       sizeBytes: row.sizeBytes,
       commentCount,
+      reactionCount,
       createdAt: row.createdAt.toISOString(),
     };
   }
@@ -479,6 +581,31 @@ export class MediaService {
         ),
       )
       .groupBy(comments.targetId);
+    return new Map(rows.map((row) => [row.targetId, row.value]));
+  }
+
+  /**
+   * One grouped query for a whole grid's worth of tiles, keyed by media id —
+   * same shape as countCommentsFor. Counts every reaction row regardless of
+   * emoji: today the app only ever puts a heart on media, but this is the
+   * "how many people reacted" count a tile shows, not a per-emoji breakdown.
+   */
+  private async countReactionsFor(
+    mediaIds: string[],
+  ): Promise<Map<string, number>> {
+    if (mediaIds.length === 0) {
+      return new Map();
+    }
+    const rows = await this.db
+      .select({ targetId: reactions.targetId, value: count() })
+      .from(reactions)
+      .where(
+        and(
+          eq(reactions.targetType, 'media'),
+          inArray(reactions.targetId, mediaIds),
+        ),
+      )
+      .groupBy(reactions.targetId);
     return new Map(rows.map((row) => [row.targetId, row.value]));
   }
 }

@@ -13,6 +13,7 @@ import { comments, media, reactions, users } from '../../database/schema';
 import { MediaService } from '../media/media.service';
 import type { Media } from '../media/validations/media.schema';
 import { NotificationService } from '../../shared/services/notification.service';
+import { NotificationsGateway } from '../../shared/services/notifications.gateway';
 import { requireTargetAccess } from '../../shared/utils/media-access.util';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
 import {
@@ -33,6 +34,7 @@ export class CommentsService {
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly mediaService: MediaService,
     private readonly notificationService: NotificationService,
+    private readonly notificationsGateway: NotificationsGateway,
   ) {}
 
   /** Anyone with visibility into the target's journey — not owner-gated. */
@@ -80,6 +82,10 @@ export class CommentsService {
         parentId: input.parentId ?? null,
       })
       .returning();
+    // Live update for whoever currently has this target open — see
+    // NotificationsGateway. Fire-and-forget in spirit even though it's
+    // synchronous: emitting to an empty room is a no-op, never a failure.
+    this.notificationsGateway.emitActivity(created.targetType, created.targetId);
     // The comment is written; announcing it must not be able to fail it.
     void this.announceComment(authorId, created);
 

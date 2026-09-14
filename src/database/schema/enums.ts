@@ -84,3 +84,15 @@ export const commentTypeEnum = pgEnum('comment_type', [
   'sticker',
   'version',
 ]);
+
+/**
+ * What a notifications row announces. Deliberately narrower than
+ * commentTypeEnum/reactions — the in-app bell only ever surfaces "someone
+ * commented" or "someone reacted", never the finer comment sub-kinds
+ * (voice/sticker/version) or which emoji; that detail lives in the row's
+ * precomputed `title`/`body`, not as something a client branches on.
+ */
+export const notificationTypeEnum = pgEnum('notification_type', [
+  'comment',
+  'reaction',
+]);

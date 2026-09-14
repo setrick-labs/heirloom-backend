@@ -367,6 +367,45 @@ export class MilestonesService {
     return this.withComputedFields(userId, journey, updated);
   }
 
+  /**
+   * Promotes one of this milestone's own memories to be its cover, instead
+   * of a fresh upload through /media/cover-upload-url. Same permission gate
+   * as rename — creator or journey owner.
+   *
+   * No new object is written to storage: this just points coverStorageKey
+   * at the memory's existing key, the same key `GET /media/:id` already
+   * presigns on every read. `coverImageUrl` is cleared alongside it — the
+   * key always wins over it (see resolveStoredImageUrl), but leaving a
+   * stale plain URL in the column is confusing to read later.
+   */
+  async setCoverFromMedia(
+    userId: string,
+    id: string,
+    mediaId: string,
+  ): Promise<Milestone> {
+    const { milestone, journey } = await this.requireManage(userId, id);
+
+    const mediaRow = await this.db.query.media.findFirst({
+      where: eq(media.id, mediaId),
+    });
+    if (!mediaRow || mediaRow.milestoneId !== milestone.id) {
+      throw new NotFoundException(
+        'That memory does not belong to this milestone.',
+      );
+    }
+
+    const [updated] = await this.db
+      .update(milestones)
+      .set({
+        coverStorageKey: mediaRow.storageKey,
+        coverImageUrl: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(milestones.id, milestone.id))
+      .returning();
+    return this.withComputedFields(userId, journey, updated);
+  }
+
   /** Section 8: creator or journey owner, soft-delete with a grace period. */
   async initiateDelete(userId: string, id: string): Promise<Milestone> {
     const { milestone, journey } = await this.requireManage(userId, id);
