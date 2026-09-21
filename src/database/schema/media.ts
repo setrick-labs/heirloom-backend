@@ -4,6 +4,7 @@ import {
   varchar,
   text,
   integer,
+  real,
   bigint,
   timestamp,
   index,
@@ -48,6 +49,11 @@ export const media = pgTable(
     width: integer('width'),
     height: integer('height'),
     durationSeconds: integer('duration_seconds'),
+    // Audio only: the recording's loudness envelope, 0–1 per bar, captured
+    // on-device while recording. Lets a voice note draw its real shape
+    // without anyone decoding the file. Null for images/video and for audio
+    // registered before this existed — clients fall back to a seeded shape.
+    waveform: real('waveform').array(),
     sizeBytes: bigint('size_bytes', { mode: 'number' }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

@@ -199,6 +199,16 @@ export class MediaService {
         storageKey: input.key,
         caption: input.caption,
         sizeBytes: input.sizeBytes,
+        // The column is whole seconds; a 0.4s tap still counts as a second
+        // rather than reading back as "no duration".
+        durationSeconds:
+          input.type === 'audio' && input.durationSeconds
+            ? Math.max(1, Math.round(input.durationSeconds))
+            : undefined,
+        waveform:
+          input.type === 'audio' && input.waveform?.length
+            ? input.waveform
+            : undefined,
         ownerId,
         // Set before the fire-and-forget pass even starts — see enums.ts.
         processingStatus: input.type === 'image' ? 'pending' : undefined,
@@ -557,6 +567,7 @@ export class MediaService {
       width: row.width,
       height: row.height,
       durationSeconds: row.durationSeconds,
+      waveform: row.waveform,
       sizeBytes: row.sizeBytes,
       commentCount,
       reactionCount,

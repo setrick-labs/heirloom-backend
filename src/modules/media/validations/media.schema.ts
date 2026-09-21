@@ -5,6 +5,9 @@ import {
   isoDateTimeSchema,
 } from '../../../shared/validations/common.schema';
 
+/** Enough bars for a comment bubble's strip; anything finer is noise nobody sees. */
+export const MAX_WAVEFORM_BARS = 64;
+
 /** Mirrors frontend/heirloom-mobile/src/schemas/media.schema.ts field-for-field. */
 export const mediaTypeSchema = z.enum(['image', 'video', 'audio']);
 export type MediaType = z.infer<typeof mediaTypeSchema>;
@@ -21,6 +24,12 @@ export const mediaSchema = z.object({
   width: z.number().int().positive().nullable().optional(),
   height: z.number().int().positive().nullable().optional(),
   durationSeconds: z.number().positive().nullable().optional(),
+  /** Audio only — see database/schema/media.ts. */
+  waveform: z
+    .array(z.number().min(0).max(1))
+    .max(MAX_WAVEFORM_BARS)
+    .nullable()
+    .optional(),
   sizeBytes: z.number().int().positive().nullable().optional(),
   /** Backs Screen 24's `💬 4` pill — the only pre-open signal a tile has a discussion. */
   commentCount: z.number().int().min(0).default(0),
@@ -45,6 +54,11 @@ export const createMediaInputSchema = z.object({
   key: z.string().min(1),
   caption: mediaSchema.shape.caption,
   sizeBytes: mediaSchema.shape.sizeBytes,
+  // Both audio-only and client-measured: the recorder knows the length and
+  // the levels exactly, and the server has no cheap way to recover either.
+  // Ignored for images/video (MediaService.create).
+  durationSeconds: mediaSchema.shape.durationSeconds,
+  waveform: mediaSchema.shape.waveform,
 });
 export type CreateMediaInput = z.infer<typeof createMediaInputSchema>;
 
