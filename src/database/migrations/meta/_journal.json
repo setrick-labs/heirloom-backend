@@ -127,6 +127,13 @@
       "when": 1790015604523,
       "tag": "0017_voice_waveform",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790016884000,
+      "tag": "0018_shared_vaults",
+      "breakpoints": true
     }
   ]
 }

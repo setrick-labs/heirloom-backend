@@ -131,3 +131,56 @@ export function buildGiftUnlockedPush(input: {
     link: { path: `/gift/${input.giftId}/reveal` },
   };
 }
+
+/**
+ * Shared Vault pushes. They name the vault — every recipient is a member who
+ * can already see that name — but never what's inside it: a notification
+ * banner is readable on a locked phone, and a caption there would be exactly
+ * the leak the vault's passcode exists to prevent.
+ */
+export function buildSharedVaultInvitePush(input: {
+  actorName: string;
+  vaultName: string;
+  vaultId: string;
+}): PushContent {
+  return {
+    title: 'Shared vault invitation',
+    body: `${input.actorName} invited you to "${input.vaultName}".`,
+    link: { path: `/shared-vault/${input.vaultId}` },
+  };
+}
+
+export function buildSharedVaultDeletionRequestPush(input: {
+  actorName: string;
+  vaultName: string;
+  vaultId: string;
+  wholeVault: boolean;
+}): PushContent {
+  return {
+    title: input.vaultName,
+    body: input.wholeVault
+      ? `${input.actorName} wants to delete this shared vault. Nothing is removed unless everyone agrees.`
+      : `${input.actorName} wants to delete a memory. Nothing is removed unless everyone agrees.`,
+    link: { path: `/shared-vault/${input.vaultId}/requests` },
+  };
+}
+
+export function buildSharedVaultDeletionResultPush(input: {
+  vaultName: string;
+  vaultId: string;
+  outcome: 'approved' | 'declined' | 'expired';
+  wholeVault: boolean;
+}): PushContent {
+  const what = input.wholeVault ? 'the vault' : 'that memory';
+  const body =
+    input.outcome === 'approved'
+      ? `Everyone agreed — ${what} has been deleted.`
+      : input.outcome === 'declined'
+        ? `Someone chose to keep ${what}, so nothing was deleted.`
+        : `Not everyone answered in time, so ${what} was kept.`;
+  return {
+    title: input.vaultName,
+    body,
+    link: { path: input.wholeVault && input.outcome === 'approved' ? '/vault' : `/shared-vault/${input.vaultId}` },
+  };
+}

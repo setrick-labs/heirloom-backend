@@ -96,3 +96,28 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'comment',
   'reaction',
 ]);
+
+/**
+ * Shared Vaults. A member is `invited` until they accept and choose their own
+ * passcode for that vault; only `active` members can unlock it, see inside
+ * it, or vote on a deletion. Declining an invite or leaving deletes the row.
+ */
+export const sharedVaultMemberRoleEnum = pgEnum('shared_vault_member_role', [
+  'owner',
+  'member',
+]);
+export const sharedVaultMemberStatusEnum = pgEnum(
+  'shared_vault_member_status',
+  ['invited', 'active'],
+);
+
+/**
+ * A mutual-delete request's life. `approved` means every other active member
+ * agreed and the thing is gone; any single "keep" makes it `declined`; one
+ * nobody finished answering within the window lapses to `expired` — and in
+ * every case but `approved`, nothing is deleted.
+ */
+export const sharedVaultDeletionStatusEnum = pgEnum(
+  'shared_vault_deletion_status',
+  ['pending', 'approved', 'declined', 'cancelled', 'expired'],
+);

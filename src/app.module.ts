@@ -19,6 +19,7 @@ import { MilestonesModule } from './modules/milestones/milestones.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { SearchModule } from './modules/search/search.module';
+import { SharedVaultsModule } from './modules/shared-vaults/shared-vaults.module';
 import { SupportModule } from './modules/support/support.module';
 import { UsersModule } from './modules/users/users.module';
 import { VaultModule } from './modules/vault/vault.module';
@@ -80,6 +81,7 @@ import { SharedModule } from './shared/shared.module';
     SearchModule,
     SupportModule,
     VaultModule,
+    SharedVaultsModule,
     GiftsModule,
     ViewsModule,
     HealthModule,

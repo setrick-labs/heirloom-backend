@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 
 import { env } from '../../config/env';
 import type { Database } from '../../database/connection';
-import { media, vaultItems } from '../../database/schema';
+import { media, sharedVaultItems, vaultItems } from '../../database/schema';
 
 const GIGABYTE = 1024 * 1024 * 1024;
 
@@ -24,7 +24,8 @@ function formatBytes(bytes: number): string {
 
 /**
  * Everything one person is charged for: the family-shared media rows they
- * own, plus their private Vault items.
+ * own, their private Vault items, and whatever they've put in shared vaults
+ * (charged to the uploader, not split across members).
  *
  * Summed live rather than kept as a running counter on `users`. Both tables
  * are hard-deleted (MediaService.delete, VaultService.deleteItem both remove
@@ -42,7 +43,7 @@ export async function getUserStorageUsage(
   db: Database,
   userId: string,
 ): Promise<StorageUsage> {
-  const [mediaTotal, vaultTotal] = await Promise.all([
+  const [mediaTotal, vaultTotal, sharedVaultTotal] = await Promise.all([
     db
       .select({
         bytes: sql<string>`coalesce(sum(${media.sizeBytes}), 0)`,
@@ -55,13 +56,21 @@ export async function getUserStorageUsage(
       })
       .from(vaultItems)
       .where(eq(vaultItems.ownerId, userId)),
+    db
+      .select({
+        bytes: sql<string>`coalesce(sum(${sharedVaultItems.sizeBytes}), 0)`,
+      })
+      .from(sharedVaultItems)
+      .where(eq(sharedVaultItems.uploaderId, userId)),
   ]);
 
   // postgres returns sum() over bigint as a numeric *string* — Number() it
   // here rather than trusting the driver, or the addition below silently
   // becomes string concatenation.
   const usedBytes =
-    Number(mediaTotal[0]?.bytes ?? 0) + Number(vaultTotal[0]?.bytes ?? 0);
+    Number(mediaTotal[0]?.bytes ?? 0) +
+    Number(vaultTotal[0]?.bytes ?? 0) +
+    Number(sharedVaultTotal[0]?.bytes ?? 0);
 
   return {
     usedBytes,

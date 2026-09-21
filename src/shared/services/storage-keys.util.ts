@@ -12,6 +12,11 @@ export interface VaultItemKeyParams {
   extension: string;
 }
 
+export interface SharedVaultItemKeyParams {
+  vaultId: string;
+  extension: string;
+}
+
 export interface CoverKeyParams {
   scope: 'family' | 'journey' | 'user' | 'milestone';
   targetId: string;
@@ -42,6 +47,20 @@ export const StorageKeys = {
   /** {userId}/vault/{uuid}.{ext} */
   vaultItem({ userId, extension }: VaultItemKeyParams): string {
     return `${userId}/vault/${randomUUID()}.${extension}`;
+  },
+
+  /**
+   * shared-vaults/{vaultId}/{uuid}.{ext} — keyed by the vault, not the
+   * uploader, so the prefix alone proves which vault a registered key was
+   * minted for (SharedVaultsService.createItem checks exactly that).
+   */
+  sharedVaultItem({ vaultId, extension }: SharedVaultItemKeyParams): string {
+    return `shared-vaults/${vaultId}/${randomUUID()}.${extension}`;
+  },
+
+  /** The prefix every item key of one shared vault starts with. */
+  sharedVaultPrefix(vaultId: string): string {
+    return `shared-vaults/${vaultId}/`;
   },
 
   /**

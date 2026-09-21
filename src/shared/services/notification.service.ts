@@ -24,6 +24,9 @@ import {
   buildGiftUnlockedPush,
   buildNewMemoryPush,
   buildReactionPush,
+  buildSharedVaultDeletionRequestPush,
+  buildSharedVaultDeletionResultPush,
+  buildSharedVaultInvitePush,
   buildVersionPush,
   buildVoiceCommentPush,
   type PushContent,
@@ -320,5 +323,70 @@ export class NotificationService {
       buildGiftUnlockedPush(input),
       'gift unlocked',
     );
+  }
+
+  /** Invited to a shared vault — rides the "invites" preference. */
+  async pushSharedVaultInvite(input: {
+    recipientIds: string[];
+    actorName: string;
+    vaultName: string;
+    vaultId: string;
+  }): Promise<void> {
+    await this.pushToAudience(
+      input.recipientIds,
+      'invites',
+      buildSharedVaultInvitePush(input),
+      'shared vault invite',
+    );
+  }
+
+  /**
+   * Someone asked to delete something shared. Deliberately NOT filtered by a
+   * preference: this is a request for the recipient's consent, and a
+   * deletion that stalls because the only people who could approve it had
+   * switched notifications off is a request nobody can act on.
+   */
+  async pushSharedVaultDeletionRequest(input: {
+    recipientIds: string[];
+    actorName: string;
+    vaultName: string;
+    vaultId: string;
+    wholeVault: boolean;
+  }): Promise<void> {
+    if (input.recipientIds.length === 0) return;
+    const content = buildSharedVaultDeletionRequestPush(input);
+    try {
+      await this.push.send({
+        userIds: input.recipientIds,
+        title: content.title,
+        body: content.body,
+        link: content.link,
+        logLabel: 'shared vault deletion request',
+      });
+    } catch (error) {
+      this.logger.error(`Failed to dispatch shared vault deletion request: ${error}`);
+    }
+  }
+
+  /** How a deletion request ended, to the person who asked. */
+  async pushSharedVaultDeletionResult(input: {
+    recipientId: string;
+    vaultName: string;
+    vaultId: string;
+    outcome: 'approved' | 'declined' | 'expired';
+    wholeVault: boolean;
+  }): Promise<void> {
+    const content = buildSharedVaultDeletionResultPush(input);
+    try {
+      await this.push.send({
+        userIds: [input.recipientId],
+        title: content.title,
+        body: content.body,
+        link: content.link,
+        logLabel: 'shared vault deletion result',
+      });
+    } catch (error) {
+      this.logger.error(`Failed to dispatch shared vault deletion result: ${error}`);
+    }
   }
 }
