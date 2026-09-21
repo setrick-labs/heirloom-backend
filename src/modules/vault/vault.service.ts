@@ -17,6 +17,7 @@ import { journeys, milestones, users, vaultItems } from '../../database/schema';
 import { StorageKeys } from '../../shared/services/storage-keys.util';
 import { StorageService } from '../../shared/services/storage.service';
 import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
+import { sessionCutoff } from '../../shared/utils/session-cutoff.util';
 import { assertStorageQuota } from '../../shared/utils/storage-quota.util';
 import { assertValidMediaUpload } from '../media/media-upload-policy';
 import { MediaService, type RequestUploadUrlResult } from '../media/media.service';
@@ -176,7 +177,9 @@ export class VaultService {
       // vault they just re-established control of.
       .set({
         vaultPasswordHash,
-        vaultSessionsInvalidatedAt: now,
+        // Whole seconds, or the session issued just below is rejected on
+        // first use — see sessionCutoff.
+        vaultSessionsInvalidatedAt: sessionCutoff(now),
         vaultFailedAttempts: 0,
         vaultLockedUntil: null,
       })

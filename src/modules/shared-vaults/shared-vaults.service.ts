@@ -34,6 +34,7 @@ import { StorageKeys } from '../../shared/services/storage-keys.util';
 import { StorageService } from '../../shared/services/storage.service';
 import { resolveStoredImageUrl } from '../../shared/utils/cover-url.util';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
+import { sessionCutoff } from '../../shared/utils/session-cutoff.util';
 import { assertStorageQuota } from '../../shared/utils/storage-quota.util';
 import { assertValidMediaUpload } from '../media/media-upload-policy';
 import type { RequestUploadUrlResult } from '../media/media.service';
@@ -971,9 +972,8 @@ export class SharedVaultsService {
       .update(sharedVaultMembers)
       .set({
         passcodeHash: await argon2.hash(passcode),
-        // Whole seconds: a JWT's `iat` is, so a timestamp with milliseconds
-        // would reject the very token issued alongside this change.
-        sessionsInvalidatedAt: new Date(Math.floor(Date.now() / 1000) * 1000),
+        // Whole seconds — see sessionCutoff.
+        sessionsInvalidatedAt: sessionCutoff(),
         failedAttempts: 0,
         lockedUntil: null,
         updatedAt: new Date(),
