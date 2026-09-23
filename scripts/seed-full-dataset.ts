@@ -6,6 +6,11 @@
  * comments, reactions, gifts in every status, a couple of vault items, and
  * a couple of private aliases.
  *
+ * Also two Shared Vaults, live family invite codes, and a notification feed.
+ * Each shared vault leaves one member on `invited` and one carries an open
+ * mutual-delete request a vote short of approval — the states a tester cannot
+ * manufacture alone, because they need somebody else to have acted first.
+ *
  * Also covers the data the 48-screen flow needs to be reviewable at all:
  * per-family public nicknames on some members but not others (so Screen
  * 34's three name states all appear), journey cover photos (Screen 17),
@@ -37,6 +42,13 @@ import {
   gifts,
   vaultItems,
   contentViews,
+  familyInvites,
+  notifications,
+  sharedVaults,
+  sharedVaultMembers,
+  sharedVaultItems,
+  sharedVaultDeletionRequests,
+  sharedVaultDeletionVotes,
 } from '../src/database/schema';
 import { MediaProcessingService } from '../src/modules/media/media-processing.service';
 import { StorageKeys } from '../src/shared/services/storage-keys.util';
@@ -438,6 +450,17 @@ function nextTheme() {
   return theme;
 }
 
+/**
+ * A stable, readable invite code, exactly the 6 characters the column allows.
+ * Deterministic on purpose: a code you can read off the seed output and type
+ * into another account beats a random one you have to go query for. The
+ * trailing family index keeps them unique, which the column requires.
+ */
+function inviteCode(familyIdx: number, tag: 'OK' | 'RV' | 'EX'): string {
+  const stem = { OK: 'JOIN0', RV: 'RVOKE', EX: 'EXPIR' }[tag];
+  return `${stem}${familyIdx}`;
+}
+
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -823,6 +846,226 @@ async function main() {
     `\n✓ Gifts: ${giftPlans.length} (mixed pending/unlocked/opened/cancelled)`,
   );
 
+  // Family invites — the join-by-code path has nowhere to start from without
+  // a live code. One usable code per family, plus a revoked and an expired one
+  // on the first family so the three rejection paths are all reachable.
+  const allFamilies = await db.query.families.findMany();
+  let inviteCount = 0;
+  for (const [idx, family] of allFamilies.entries()) {
+    const variants: { code: string; expiresAt: Date; revokedAt?: Date }[] = [
+      {
+        code: inviteCode(idx, 'OK'),
+        expiresAt: new Date(Date.now() + 7 * DAY_MS),
+      },
+    ];
+    if (idx === 0) {
+      variants.push(
+        {
+          code: inviteCode(idx, 'RV'),
+          expiresAt: new Date(Date.now() + 7 * DAY_MS),
+          revokedAt: new Date(),
+        },
+        {
+          code: inviteCode(idx, 'EX'),
+          expiresAt: new Date(Date.now() - DAY_MS),
+        },
+      );
+    }
+    for (const variant of variants) {
+      await db.insert(familyInvites).values({
+        familyId: family.id,
+        code: variant.code,
+        createdBy: family.ownerId,
+        expiresAt: variant.expiresAt,
+        revokedAt: variant.revokedAt,
+      });
+      inviteCount++;
+    }
+    console.log(`  ✓ Invite code for ${family.name}: ${variants[0].code}`);
+  }
+
+  // Shared Vaults. Two of the three families get one, so both "I have shared
+  // vaults" and "I have none" render. Each vault deliberately leaves one
+  // member on `invited`: accepting an invitation is the one flow a tester
+  // cannot manufacture alone, because it needs somebody else to have invited
+  // them first.
+  const sharedVaultPlans: {
+    familyIdx: number;
+    name: string;
+    /** Members by index within FAMILY_PLANS[familyIdx].members. */
+    activeIdx: number[];
+    invitedIdx: number[];
+    items: number;
+    /** Open a mutual-delete request on the first item, one vote short. */
+    pendingDeletion: boolean;
+  }[] = [
+    {
+      familyIdx: 0,
+      name: "Grandma's Letters",
+      activeIdx: [0, 1, 2],
+      invitedIdx: [3],
+      items: 3,
+      pendingDeletion: true,
+    },
+    {
+      familyIdx: 1,
+      name: 'Just Us Two',
+      activeIdx: [0, 1],
+      invitedIdx: [2],
+      items: 2,
+      pendingDeletion: false,
+    },
+  ];
+
+  const passcodeHash = await argon2.hash(VAULT_PASSWORD);
+  let sharedVaultCount = 0;
+  let sharedVaultItemCount = 0;
+
+  for (const plan of sharedVaultPlans) {
+    const family = allFamilies[plan.familyIdx];
+    const emails = FAMILY_PLANS[plan.familyIdx].members.map((m) => m.email);
+    const memberRows = await db.query.users.findMany();
+    const idOf = (i: number) =>
+      memberRows.find((u) => u.email === emails[i])!.id;
+
+    const [vault] = await db
+      .insert(sharedVaults)
+      .values({
+        familyId: family.id,
+        name: plan.name,
+        createdBy: idOf(plan.activeIdx[0]),
+      })
+      .returning();
+    sharedVaultCount++;
+
+    const memberIds: string[] = [];
+    for (const [position, i] of plan.activeIdx.entries()) {
+      // Every member picks their own passcode, so each active row carries its
+      // own hash — the same seed passphrase here purely for testability.
+      await db.insert(sharedVaultMembers).values({
+        vaultId: vault.id,
+        userId: idOf(i),
+        role: position === 0 ? 'owner' : 'member',
+        status: 'active',
+        invitedBy: idOf(plan.activeIdx[0]),
+        passcodeHash,
+        joinedAt: new Date(Date.now() - (position + 1) * DAY_MS),
+      });
+      memberIds.push(idOf(i));
+    }
+    for (const i of plan.invitedIdx) {
+      // passcodeHash stays null: an invitee has not chosen one yet.
+      await db.insert(sharedVaultMembers).values({
+        vaultId: vault.id,
+        userId: idOf(i),
+        role: 'member',
+        status: 'invited',
+        invitedBy: idOf(plan.activeIdx[0]),
+      });
+    }
+
+    const itemIds: string[] = [];
+    for (let i = 0; i < plan.items; i++) {
+      const theme = nextTheme();
+      const fileBuffer = readFileSync(`${SEED_ASSETS_DIR}/${theme.file}`);
+      const key = StorageKeys.sharedVaultItem({
+        vaultId: vault.id,
+        extension: 'jpg',
+      });
+      const uploadUrl = await storage.generatePresignedUploadUrl(
+        key,
+        IMAGE_CONTENT_TYPE,
+      );
+      const res = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': IMAGE_CONTENT_TYPE },
+        body: fileBuffer,
+      });
+      if (!res.ok) throw new Error(`Shared vault upload failed: ${res.status}`);
+      const [item] = await db
+        .insert(sharedVaultItems)
+        .values({
+          vaultId: vault.id,
+          uploaderId: memberIds[i % memberIds.length],
+          type: 'image',
+          storageKey: key,
+          caption: `Shared — ${theme.title}`,
+          sizeBytes: fileBuffer.byteLength,
+        })
+        .returning();
+      itemIds.push(item.id);
+      sharedVaultItemCount++;
+    }
+
+    if (plan.pendingDeletion) {
+      // Requested by the owner, approved by exactly one of the two other
+      // active members. Approval is derived against current membership, so
+      // leaving the third vote outstanding keeps this genuinely `pending`
+      // rather than an approved request mislabelled in the fixture.
+      const [request] = await db
+        .insert(sharedVaultDeletionRequests)
+        .values({
+          vaultId: vault.id,
+          itemId: itemIds[0],
+          requestedBy: memberIds[0],
+          status: 'pending',
+          expiresAt: new Date(Date.now() + 3 * DAY_MS),
+        })
+        .returning();
+      await db.insert(sharedVaultDeletionVotes).values({
+        requestId: request.id,
+        userId: memberIds[1],
+        approve: true,
+      });
+    }
+
+    console.log(
+      `  ✓ Shared Vault "${plan.name}": ${plan.activeIdx.length} active, ` +
+        `${plan.invitedIdx.length} invited, ${plan.items} items` +
+        (plan.pendingDeletion ? ', 1 open delete vote' : ''),
+    );
+  }
+
+  // Notifications — built from comments and reactions that already exist, so
+  // every row points at something a tester can actually open. Roughly a third
+  // left unread, which is what makes the tab badge non-zero.
+  const seededComments = await db.query.comments.findMany({ limit: 24 });
+  let notificationCount = 0;
+  for (const [idx, comment] of seededComments.entries()) {
+    // Both are nullable on the column: a comment can be a photo reply with no
+    // text, and need not hang off a photo at all.
+    const mediaId = comment.mediaId;
+    if (!mediaId) continue;
+
+    const target = await db.query.media.findFirst({
+      where: eq(media.id, mediaId),
+    });
+    if (!target?.ownerId) continue;
+    // A notification to yourself about your own comment is noise, not a state
+    // worth rendering.
+    if (target.ownerId === comment.authorId) continue;
+
+    const isReaction = idx % 3 === 2;
+    await db.insert(notifications).values({
+      recipientId: target.ownerId,
+      actorId: comment.authorId,
+      type: isReaction ? 'reaction' : 'comment',
+      targetType: 'media',
+      targetId: mediaId,
+      mediaId,
+      title: isReaction ? 'New reaction' : 'New comment',
+      body: isReaction
+        ? `${pick(REACTION_EMOJIS)} on your photo`
+        : (comment.body?.slice(0, 200) ?? 'Replied with a photo'),
+      createdAt: new Date(Date.now() - idx * 3600_000),
+      readAt: idx % 3 === 0 ? undefined : new Date(),
+    });
+    notificationCount++;
+  }
+  console.log(
+    `  ✓ Notifications: ${notificationCount} (every third one unread)`,
+  );
+
   console.log('\nDone.');
   console.log('─'.repeat(56));
   console.log(`  Families:    ${familyCount}`);
@@ -834,6 +1077,11 @@ async function main() {
   console.log(`  Reactions:   ${reactionCount}`);
   console.log(`  Vault items: ${vaultItemCount}`);
   console.log(`  Gifts:       ${giftPlans.length}`);
+  console.log(`  Invites:     ${inviteCount}`);
+  console.log(
+    `  Shared vaults: ${sharedVaultCount} (${sharedVaultItemCount} items)`,
+  );
+  console.log(`  Notifications: ${notificationCount}`);
   console.log('─'.repeat(56));
   console.log(`  Shared password (all accounts): ${SEED_PASSWORD}`);
   console.log(`  Vault password (owner of each family): ${VAULT_PASSWORD}`);

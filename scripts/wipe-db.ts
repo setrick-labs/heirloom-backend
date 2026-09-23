@@ -24,6 +24,12 @@ import {
   vaultItems,
   gifts,
   contentViews,
+  notifications,
+  sharedVaults,
+  sharedVaultMembers,
+  sharedVaultItems,
+  sharedVaultDeletionRequests,
+  sharedVaultDeletionVotes,
 } from '../src/database/schema';
 
 // Children before parents, so no FK violation even without CASCADE.
@@ -31,6 +37,18 @@ const TABLES_IN_DELETE_ORDER = [
   // Polymorphic, references nothing but users — safe to clear first.
   { name: 'content_views', table: contentViews },
   { name: 'gifts', table: gifts },
+  // Before media and users, both of which it points at.
+  { name: 'notifications', table: notifications },
+  // Shared Vaults, innermost first: votes hang off requests, everything else
+  // off the vault, and the vault off its family.
+  { name: 'shared_vault_deletion_votes', table: sharedVaultDeletionVotes },
+  {
+    name: 'shared_vault_deletion_requests',
+    table: sharedVaultDeletionRequests,
+  },
+  { name: 'shared_vault_items', table: sharedVaultItems },
+  { name: 'shared_vault_members', table: sharedVaultMembers },
+  { name: 'shared_vaults', table: sharedVaults },
   { name: 'reactions', table: reactions },
   { name: 'comments', table: comments },
   { name: 'media', table: media },
