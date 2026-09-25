@@ -131,6 +131,20 @@ export class NotificationsGateway implements OnGatewayConnection {
     this.server?.to(userRoom(recipientId)).emit('notification:new', notification);
   }
 
+  /**
+   * The target itself is gone — deleted, or moved out of the family's view
+   * (into someone's Vault). Whoever has it open should stop showing it
+   * rather than find out on their next tap.
+   */
+  emitRemoved(targetType: string, targetId: string, actorId: string): void {
+    this.server
+      ?.to(targetRoom(targetType, targetId))
+      // Not the person who removed it: their own screen already knows, and
+      // "this was just deleted" about your own action reads as a glitch.
+      .except(userRoom(actorId))
+      .emit('content:removed', { targetType, targetId });
+  }
+
   /** For whoever currently has this target open — see `join` above. */
   emitActivity(targetType: string, targetId: string): void {
     this.server

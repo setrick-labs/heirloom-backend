@@ -20,6 +20,7 @@ import {
 } from '../../database/schema';
 import { NotificationService } from '../../shared/services/notification.service';
 import { StorageKeys } from '../../shared/services/storage-keys.util';
+import { NotificationsGateway } from '../../shared/services/notifications.gateway';
 import { StorageService } from '../../shared/services/storage.service';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
 import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
@@ -62,6 +63,7 @@ export class MediaService {
     private readonly storageService: StorageService,
     private readonly mediaProcessingService: MediaProcessingService,
     private readonly notificationService: NotificationService,
+    private readonly notificationsGateway: NotificationsGateway,
   ) {}
 
   /**
@@ -415,6 +417,7 @@ export class MediaService {
         );
       await tx.delete(media).where(eq(media.id, id));
     });
+    this.notificationsGateway.emitRemoved('media', id, userId);
 
     try {
       // Every copy, not just the original — the variants used to be left
@@ -485,6 +488,8 @@ export class MediaService {
         })
         .returning();
     });
+    // Gone from the family's view as surely as a delete.
+    this.notificationsGateway.emitRemoved('media', mediaId, userId);
 
     try {
       await this.deleteStoredCopies(row);
