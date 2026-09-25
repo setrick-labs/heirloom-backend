@@ -1,0 +1,1 @@
+ALTER TABLE "media" ADD COLUMN "zoom_storage_key" text;

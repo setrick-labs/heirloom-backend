@@ -89,7 +89,7 @@ export const StorageKeys = {
    * extension. Keeps variants co-located with their original without a
    * separate lookup table.
    */
-  mediaVariant(originalKey: string, variant: 'thumb' | 'display'): string {
+  mediaVariant(originalKey: string, variant: 'thumb' | 'display' | 'zoom'): string {
     const lastDot = originalKey.lastIndexOf('.');
     const withoutExtension =
       lastDot === -1 ? originalKey : originalKey.slice(0, lastDot);

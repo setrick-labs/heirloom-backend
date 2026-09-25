@@ -417,7 +417,9 @@ export class MediaService {
     });
 
     try {
-      await this.storageService.deleteObject(row.storageKey);
+      // Every copy, not just the original — the variants used to be left
+      // behind in the bucket after the row was gone.
+      await this.deleteStoredCopies(row);
     } catch (error) {
       // Never let storage cleanup block the DB operation the user is
       // waiting on — an orphaned R2 object is cheap; a stuck delete isn't.
@@ -485,13 +487,7 @@ export class MediaService {
     });
 
     try {
-      await this.storageService.deleteObject(row.storageKey);
-      if (row.thumbnailStorageKey) {
-        await this.storageService.deleteObject(row.thumbnailStorageKey);
-      }
-      if (row.displayStorageKey) {
-        await this.storageService.deleteObject(row.displayStorageKey);
-      }
+      await this.deleteStoredCopies(row);
     } catch (error) {
       this.logger.warn(
         `Failed to delete storage object(s) for moved media ${mediaId}: ${error}`,
@@ -506,6 +502,22 @@ export class MediaService {
       sizeBytes: item.sizeBytes,
       createdAt: item.createdAt.toISOString(),
     };
+  }
+
+  /** The original and whichever processed variants exist for it. */
+  private async deleteStoredCopies(
+    row: Pick<
+      typeof media.$inferSelect,
+      'storageKey' | 'thumbnailStorageKey' | 'displayStorageKey' | 'zoomStorageKey'
+    >,
+  ): Promise<void> {
+    const keys = [
+      row.storageKey,
+      row.thumbnailStorageKey,
+      row.displayStorageKey,
+      row.zoomStorageKey,
+    ].filter((key): key is string => Boolean(key));
+    for (const key of keys) await this.storageService.deleteObject(key);
   }
 
   private async resolveUrl(storageKey: string): Promise<string> {
@@ -551,9 +563,12 @@ export class MediaService {
 
     // Falls back to the original whenever a variant key is unset — non-image
     // media, or an image whose processing pass failed/hasn't run yet.
-    const [url, thumbnailUrl] = await Promise.all([
+    const [url, thumbnailUrl, zoomUrl] = await Promise.all([
       this.resolveUrl(row.displayStorageKey ?? row.storageKey),
       this.resolveUrl(row.thumbnailStorageKey ?? row.storageKey),
+      // No fallback to the original here, unlike the two above: it can be any
+      // size, and decoding it on zoom is exactly the memory spike this avoids.
+      row.zoomStorageKey ? this.resolveUrl(row.zoomStorageKey) : null,
     ]);
     return {
       id: row.id,
@@ -562,6 +577,7 @@ export class MediaService {
       type: row.type,
       url,
       thumbnailUrl,
+      zoomUrl,
       blurhash: row.blurhash,
       caption: row.caption,
       width: row.width,

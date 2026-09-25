@@ -19,6 +19,8 @@ export const mediaSchema = z.object({
   type: mediaTypeSchema,
   url: z.url(),
   thumbnailUrl: z.url().nullable().optional(),
+  /** Sharper copy for pinch-zoom; null when the display variant is all there is. */
+  zoomUrl: z.url().nullable().optional(),
   blurhash: z.string().nullable().optional(),
   caption: z.string().max(500).nullable().optional(),
   width: z.number().int().positive().nullable().optional(),

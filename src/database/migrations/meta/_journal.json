@@ -134,6 +134,13 @@
       "when": 1790016884000,
       "tag": "0018_shared_vaults",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790363265716,
+      "tag": "0019_media_zoom_variant",
+      "breakpoints": true
     }
   ]
 }

@@ -39,6 +39,11 @@ export const media = pgTable(
     // toDto() falls back to the original storageKey when unset.
     thumbnailStorageKey: text('thumbnail_storage_key'),
     displayStorageKey: text('display_storage_key'),
+    // A sharper copy the viewer loads only once someone pinch-zooms — the
+    // 960px display variant goes soft past about 2x. Null for images too
+    // small to need one, and for rows processed before it existed; clients
+    // keep zooming the display variant then.
+    zoomStorageKey: text('zoom_storage_key'),
     // Compact base83 blurhash string — decoded client-side into an instant
     // placeholder while the real image loads, instead of a blank tile.
     blurhash: text('blurhash'),

@@ -18,6 +18,12 @@ import type { MediaType } from './validations/media.schema';
 const THUMB_WIDTH = 240;
 const DISPLAY_WIDTH = 960;
 const WEBP_QUALITY = 75;
+// The pinch-zoom copy. Only made when the original is meaningfully wider
+// than the display variant — below that, zooming the display copy is as
+// sharp as the source allows, and a second near-identical file is waste.
+const ZOOM_WIDTH = 2048;
+const ZOOM_WEBP_QUALITY = 80;
+const ZOOM_MIN_SOURCE_WIDTH = DISPLAY_WIDTH * 1.5;
 // Blurhash components — 4x3 is the standard "enough detail, still tiny" split.
 const BLURHASH_COMPONENTS_X = 4;
 const BLURHASH_COMPONENTS_Y = 3;
@@ -25,6 +31,7 @@ const BLURHASH_COMPONENTS_Y = 3;
 export interface ProcessedImage {
   thumbnailStorageKey: string;
   displayStorageKey: string;
+  zoomStorageKey: string | null;
   blurhash: string;
   width: number;
   height: number;
@@ -75,6 +82,7 @@ export class MediaProcessingService {
         .set({
           thumbnailStorageKey: result.thumbnailStorageKey,
           displayStorageKey: result.displayStorageKey,
+          zoomStorageKey: result.zoomStorageKey,
           blurhash: result.blurhash,
           width: result.width,
           height: result.height,
@@ -119,8 +127,13 @@ export class MediaProcessingService {
       const original = await this.storageService.getObjectBuffer(originalKey);
       const image = sharp(original, { failOn: 'none' }).rotate();
       const metadata = await image.metadata();
+      // EXIF orientations 5–8 are rotated 90°, so the stored width is the
+      // displayed height — measure the side `resize({ width })` will act on.
+      const uprightWidth =
+        (metadata.orientation ?? 1) >= 5 ? metadata.height : metadata.width;
+      const wantsZoom = (uprightWidth ?? 0) >= ZOOM_MIN_SOURCE_WIDTH;
 
-      const [thumbBuffer, displayBuffer, blurhash] = await Promise.all([
+      const [thumbBuffer, displayBuffer, zoomBuffer, blurhash] = await Promise.all([
         image
           .clone()
           .resize({ width: THUMB_WIDTH, withoutEnlargement: true })
@@ -131,6 +144,13 @@ export class MediaProcessingService {
           .resize({ width: DISPLAY_WIDTH, withoutEnlargement: true })
           .webp({ quality: WEBP_QUALITY })
           .toBuffer(),
+        wantsZoom
+          ? image
+              .clone()
+              .resize({ width: ZOOM_WIDTH, withoutEnlargement: true })
+              .webp({ quality: ZOOM_WEBP_QUALITY })
+              .toBuffer()
+          : Promise.resolve(null),
         this.computeBlurhash(image),
       ]);
 
@@ -143,6 +163,10 @@ export class MediaProcessingService {
         'display',
       );
 
+      const zoomStorageKey = zoomBuffer
+        ? StorageKeys.mediaVariant(originalKey, 'zoom')
+        : null;
+
       await Promise.all([
         this.storageService.putObject(
           thumbnailStorageKey,
@@ -154,11 +178,15 @@ export class MediaProcessingService {
           displayBuffer,
           'image/webp',
         ),
+        zoomBuffer && zoomStorageKey
+          ? this.storageService.putObject(zoomStorageKey, zoomBuffer, 'image/webp')
+          : Promise.resolve(),
       ]);
 
       return {
         thumbnailStorageKey,
         displayStorageKey,
+        zoomStorageKey,
         blurhash,
         width: metadata.width ?? 0,
         height: metadata.height ?? 0,
