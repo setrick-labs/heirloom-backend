@@ -278,6 +278,8 @@ export class CommentsService {
       );
     }
     await this.db.delete(comments).where(eq(comments.id, id));
+    // Same live update as create() — a removed comment changes the count too.
+    this.notificationsGateway.emitActivity(row.targetType, row.targetId);
   }
 
   private async toDto(

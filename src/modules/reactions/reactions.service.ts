@@ -95,7 +95,7 @@ export class ReactionsService {
     targetId: string,
     emoji: string,
   ): Promise<void> {
-    await this.db
+    const removed = await this.db
       .delete(reactions)
       .where(
         and(
@@ -104,7 +104,13 @@ export class ReactionsService {
           eq(reactions.userId, userId),
           eq(reactions.emoji, emoji),
         ),
-      );
+      )
+      .returning({ id: reactions.id });
+
+    // An unlike moves the count as much as a like does; viewers need both.
+    if (removed.length > 0) {
+      this.notificationsGateway.emitActivity(targetType, targetId);
+    }
   }
 
   /** Grouped by emoji, for the reaction bar. */

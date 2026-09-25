@@ -92,6 +92,10 @@ export class NotificationsGateway implements OnGatewayConnection {
 
       socket.data.userId = user.id;
       await socket.join(userRoom(user.id));
+      // Joins sent before this point are dropped by onJoin (no userId yet),
+      // and a client connects — and flushes its queued joins — before this
+      // async check finishes. `ready` tells it when to (re)send them.
+      socket.emit('ready');
     } catch (error) {
       this.logger.warn(`Rejected socket connection: ${error}`);
       socket.disconnect(true);
