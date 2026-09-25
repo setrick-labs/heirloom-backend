@@ -28,7 +28,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const user = await this.db.query.users.findFirst({
       where: eq(users.id, payload.sub),
     });
-    if (!user) {
+    if (!user || user.status === 'deleted') {
       throw new UnauthorizedException();
     }
     if (user.status === 'suspended') {

@@ -12,5 +12,7 @@ import { SharedVaultsService } from './shared-vaults.service';
   imports: [JwtModule.register({ secret: env.JWT_ACCESS_SECRET })],
   controllers: [SharedVaultsController],
   providers: [SharedVaultsService, SharedVaultAccessGuard],
+  // Account deletion leaves each shared vault through the same path.
+  exports: [SharedVaultsService],
 })
 export class SharedVaultsModule {}

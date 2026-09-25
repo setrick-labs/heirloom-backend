@@ -141,6 +141,13 @@
       "when": 1790363265716,
       "tag": "0019_media_zoom_variant",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790364887101,
+      "tag": "0020_user_status_deleted",
+      "breakpoints": true
     }
   ]
 }

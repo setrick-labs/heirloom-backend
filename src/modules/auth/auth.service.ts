@@ -189,6 +189,11 @@ export class AuthService {
           'This account has not been verified yet. Request a new code to continue.',
       });
     }
+    // Unreachable in practice (a deleted account's email and password are
+    // both scrubbed), but never let a deleted account back in by any path.
+    if (user.status === 'deleted') {
+      throw new UnauthorizedException('Incorrect email/phone or password');
+    }
     if (user.status === 'suspended') {
       throw new UnauthorizedException({
         code: 'ACCOUNT_SUSPENDED',

@@ -7,6 +7,7 @@ import { LoggerModule } from 'nestjs-pino';
 
 import { env, validateEnv } from './config/env';
 import { DatabaseModule } from './database/database.module';
+import { AccountModule } from './modules/account/account.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { FamiliesModule } from './modules/families/families.module';
@@ -71,6 +72,7 @@ import { SharedModule } from './shared/shared.module';
     SharedModule,
     AuthModule,
     UsersModule,
+    AccountModule,
     FamiliesModule,
     JourneysModule,
     MilestonesModule,

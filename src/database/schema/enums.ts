@@ -13,11 +13,15 @@ export const familyRoleEnum = pgEnum('family_role', [
  * (email/phone); accounts stay pending indefinitely if abandoned, never
  * auto-delete. 'suspended' has no admin tooling to set it yet — the state
  * exists so sign-in can handle it defensively per the auth functional spec.
+ * 'deleted' = the person deleted their account; the row survives, anonymised,
+ * because their family contributions still point at it (see
+ * AccountDeletionService). Terminal — nothing moves an account out of it.
  */
 export const userStatusEnum = pgEnum('user_status', [
   'pending',
   'active',
   'suspended',
+  'deleted',
 ]);
 
 /** What an auth_tokens row is for — one table backs both flows since both are "single-use, time-limited, delivered out of band". */

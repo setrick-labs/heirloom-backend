@@ -80,7 +80,7 @@ export class NotificationsGateway implements OnGatewayConnection {
       const user = await this.db.query.users.findFirst({
         where: eq(users.id, payload.sub),
       });
-      if (!user || user.status === 'suspended') {
+      if (!user || user.status === 'suspended' || user.status === 'deleted') {
         throw new Error('Invalid or suspended account');
       }
       if (
