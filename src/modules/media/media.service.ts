@@ -281,6 +281,7 @@ export class MediaService {
       await this.notificationService.pushNewMemory({
         actorId: ownerId,
         actorName: actor.name,
+        familyId: journey.familyId,
         journeyId: journey.id,
         journeyTitle: journey.title,
         milestoneId,

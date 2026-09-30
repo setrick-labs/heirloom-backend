@@ -18,6 +18,7 @@ import {
 } from './gift-email.template';
 import { MailerService } from './mailer.service';
 import { NotificationFeedService } from './notification-feed.service';
+import { NotificationsGateway } from './notifications.gateway';
 import {
   buildCommentPush,
   buildFamilyJoinPush,
@@ -52,6 +53,7 @@ export class NotificationService {
     private readonly mailer: MailerService,
     private readonly push: PushService,
     private readonly notificationFeed: NotificationFeedService,
+    private readonly gateway: NotificationsGateway,
   ) {}
 
   /**
@@ -186,6 +188,7 @@ export class NotificationService {
   async pushNewMemory(input: {
     actorId: string;
     actorName: string;
+    familyId: string;
     journeyId: string;
     journeyTitle: string;
     milestoneId?: string | null;
@@ -196,6 +199,13 @@ export class NotificationService {
       input.journeyId,
       input.actorId,
     );
+    // Everyone who can see it, whatever their push preference: this only
+    // refreshes the lists and "N new" badges already on their screen.
+    this.gateway.emitToUsers(audience, 'content:changed', {
+      familyId: input.familyId,
+      journeyId: input.journeyId,
+      milestoneId: input.milestoneId ?? null,
+    });
     await this.pushToAudience(
       audience,
       'memories',
@@ -235,18 +245,19 @@ export class NotificationService {
         ? buildVoiceCommentPush(input)
         : buildCommentPush({ ...input, body: input.body ?? '' });
 
-    await this.pushToAudience(
-      recipients,
-      isVersion ? 'versions' : 'comments',
-      content,
-      isVersion ? 'version' : 'comment',
-    );
-
     // The bell's durable record of the same event — see notification-feed
-    // .service.ts. Reuses the exact copy the push just used rather than
-    // recomputing it, so the two never drift.
-    await Promise.all(
-      recipients.map((recipientId) =>
+    // .service.ts — reusing the push's exact copy so the two never drift.
+    // Run alongside the push, not after it: recording is what emits the
+    // in-app `notification:new`, and waiting on OneSignal first held every
+    // in-app notification back by that provider's round trip.
+    await Promise.all([
+      this.pushToAudience(
+        recipients,
+        isVersion ? 'versions' : 'comments',
+        content,
+        isVersion ? 'version' : 'comment',
+      ),
+      ...recipients.map((recipientId) =>
         this.notificationFeed.record({
           recipientId,
           actorId: input.actorId,
@@ -258,7 +269,7 @@ export class NotificationService {
           body: content.body,
         }),
       ),
-    );
+    ]);
   }
 
   /** A reaction on your memory. Shares the 'comments' preference — the toggle reads "Comments and reactions". */
@@ -272,18 +283,20 @@ export class NotificationService {
     if (input.ownerId === input.actorId) return;
 
     const content = buildReactionPush(input);
-    await this.pushToAudience([input.ownerId], 'comments', content, 'reaction');
-
-    await this.notificationFeed.record({
-      recipientId: input.ownerId,
-      actorId: input.actorId,
-      type: 'reaction',
-      targetType: 'media',
-      targetId: input.mediaId,
-      mediaId: input.mediaId,
-      title: content.title,
-      body: content.body,
-    });
+    // Side by side for the same reason as pushComment.
+    await Promise.all([
+      this.pushToAudience([input.ownerId], 'comments', content, 'reaction'),
+      this.notificationFeed.record({
+        recipientId: input.ownerId,
+        actorId: input.actorId,
+        type: 'reaction',
+        targetType: 'media',
+        targetId: input.mediaId,
+        mediaId: input.mediaId,
+        title: content.title,
+        body: content.body,
+      }),
+    ]);
   }
 
   /** Someone joined a family you're in. */
@@ -298,6 +311,11 @@ export class NotificationService {
       input.familyId,
       input.actorId,
     );
+    // Member lists on everyone else's screen pick the newcomer up now,
+    // rather than when the family's 10-minute cache runs out.
+    this.gateway.emitToUsers(audience, 'family:changed', {
+      familyId: input.familyId,
+    });
     await this.pushToAudience(
       audience,
       'invites',

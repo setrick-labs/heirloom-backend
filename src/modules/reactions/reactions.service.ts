@@ -52,7 +52,9 @@ export class ReactionsService {
     // on the same thing. Re-notifying on a no-op would let anyone ping a
     // photo's owner repeatedly by tapping a reaction they had already left.
     if (inserted.length > 0) {
-      this.notificationsGateway.emitActivity(input.targetType, input.targetId);
+      this.notificationsGateway.emitActivity(input.targetType, input.targetId, {
+        actorId: userId,
+      });
       void this.announceReaction(userId, input);
     }
   }
@@ -109,7 +111,9 @@ export class ReactionsService {
 
     // An unlike moves the count as much as a like does; viewers need both.
     if (removed.length > 0) {
-      this.notificationsGateway.emitActivity(targetType, targetId);
+      this.notificationsGateway.emitActivity(targetType, targetId, {
+        actorId: userId,
+      });
     }
   }
 

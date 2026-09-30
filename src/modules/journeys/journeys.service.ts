@@ -19,6 +19,7 @@ import {
   milestones,
   users,
 } from '../../database/schema';
+import { NotificationsGateway } from '../../shared/services/notifications.gateway';
 import { StorageService } from '../../shared/services/storage.service';
 import { resolveCoverImageUrl } from '../../shared/utils/cover-url.util';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
@@ -68,6 +69,7 @@ export class JourneysService {
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly giftsService: GiftsService,
     private readonly storageService: StorageService,
+    private readonly notificationsGateway: NotificationsGateway,
   ) {}
 
   async create(userId: string, input: CreateJourneyInput): Promise<Journey> {
@@ -387,13 +389,25 @@ export class JourneysService {
       );
     }
     await this.assertAllAreFamilyMembers(journey.familyId, input.userIds);
+    if (input.userIds.length === 0) return;
 
-    for (const memberUserId of input.userIds) {
-      await this.db
-        .insert(journeyMembers)
-        .values({ journeyId, userId: memberUserId })
-        .onConflictDoNothing();
-    }
+    // One statement, not one round trip per person.
+    await this.db
+      .insert(journeyMembers)
+      .values(
+        input.userIds.map((memberUserId) => ({
+          journeyId,
+          userId: memberUserId,
+        })),
+      )
+      .onConflictDoNothing();
+
+    // The journey appears in their list now, not whenever it next refetches.
+    this.notificationsGateway.emitToUsers(input.userIds, 'content:changed', {
+      familyId: journey.familyId,
+      journeyId,
+      milestoneId: null,
+    });
   }
 
   /** Section 3 edge case: removing the owner isn't meaningful — rejected, not just hidden from the UI. */

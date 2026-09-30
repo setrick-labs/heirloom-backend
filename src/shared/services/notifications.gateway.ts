@@ -22,10 +22,11 @@ interface AccessTokenPayload {
 }
 
 /**
- * Live delivery for two things: the notification bell (`notification:new`,
- * to whoever the notification is for) and "someone just commented/reacted
- * on the thing you have open" (`activity:new`, to whoever is currently
- * looking at that target).
+ * Live delivery for three things: the notification bell (`notification:new`,
+ * to whoever the notification is for), "someone just commented/reacted on
+ * the thing you have open" (`activity:new`, to whoever is currently looking
+ * at that target), and "a list you can see changed" (`content:changed` /
+ * `family:changed` — new memories, members — so badges and rosters refresh).
  *
  * This is new infrastructure the team's own decision doc
  * (docs/decisions/realtime-comments.md) had deliberately deferred — polling
@@ -145,11 +146,36 @@ export class NotificationsGateway implements OnGatewayConnection {
       .emit('content:removed', { targetType, targetId });
   }
 
-  /** For whoever currently has this target open — see `join` above. */
-  emitActivity(targetType: string, targetId: string): void {
+  /**
+   * For whoever currently has this target open — see `join` above.
+   *
+   * `actorId` lets the author's own device skip the refetch its mutation is
+   * already doing. `comment` carries a freshly-created comment so everyone
+   * else can draw it straight away instead of refetching the whole thread.
+   */
+  emitActivity(
+    targetType: string,
+    targetId: string,
+    extra: { actorId?: string; comment?: unknown } = {},
+  ): void {
     this.server
       ?.to(targetRoom(targetType, targetId))
-      .emit('activity:new', { targetType, targetId });
+      .emit('activity:new', { targetType, targetId, ...extra });
+  }
+
+  /**
+   * "Something you can see changed" — a new memory, a new family member, a
+   * journey you were just added to. Sent to people rather than to an open
+   * screen, so the lists and "N new" badges they're looking at refresh
+   * without waiting out their cache.
+   */
+  emitToUsers(
+    userIds: string[],
+    event: 'content:changed' | 'family:changed',
+    payload: object,
+  ): void {
+    if (!this.server || userIds.length === 0) return;
+    this.server.to([...new Set(userIds)].map(userRoom)).emit(event, payload);
   }
 }
 

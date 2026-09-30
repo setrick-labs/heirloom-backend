@@ -82,18 +82,28 @@ export class CommentsService {
         parentId: input.parentId ?? null,
       })
       .returning();
-    // Live update for whoever currently has this target open — see
-    // NotificationsGateway. Fire-and-forget in spirit even though it's
-    // synchronous: emitting to an empty room is a no-op, never a failure.
-    this.notificationsGateway.emitActivity(created.targetType, created.targetId);
-    // The comment is written; announcing it must not be able to fail it.
-    void this.announceComment(authorId, created);
 
-    return this.toDto(authorId, created, {
+    const dto = await this.toDto(authorId, created, {
       replyCount: 0,
       reactions: [],
       attachment,
     });
+    // Live update for whoever currently has this target open — see
+    // NotificationsGateway. Carries the comment itself so their screen can
+    // draw it at once rather than refetch the thread to find it. Emitting to
+    // an empty room is a no-op, never a failure.
+    this.notificationsGateway.emitActivity(
+      created.targetType,
+      created.targetId,
+      {
+        actorId: authorId,
+        comment: dto,
+      },
+    );
+    // The comment is written; announcing it must not be able to fail it.
+    void this.announceComment(authorId, created);
+
+    return dto;
   }
 
   /**
@@ -279,7 +289,9 @@ export class CommentsService {
     }
     await this.db.delete(comments).where(eq(comments.id, id));
     // Same live update as create() — a removed comment changes the count too.
-    this.notificationsGateway.emitActivity(row.targetType, row.targetId);
+    this.notificationsGateway.emitActivity(row.targetType, row.targetId, {
+      actorId: userId,
+    });
   }
 
   private async toDto(
