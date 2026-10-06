@@ -24,8 +24,10 @@ import {
 import { maskEmail } from '../../shared/utils/mask-email.util';
 import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
 import { sessionCutoff } from '../../shared/utils/session-cutoff.util';
+import { deleteStoredKeys } from '../../shared/utils/media-variants.util';
 import { assertStorageQuota } from '../../shared/utils/storage-quota.util';
 import { assertValidMediaUpload } from '../media/media-upload-policy';
+import { MediaProcessingService } from '../media/media-processing.service';
 import { MediaService, type RequestUploadUrlResult } from '../media/media.service';
 import type { Media } from '../media/validations/media.schema';
 import {
@@ -39,6 +41,7 @@ import {
   VaultSession,
   VaultStatus,
 } from './validations/vault.schema';
+import { toVaultItemDto } from './vault-item.dto';
 
 @Injectable()
 export class VaultService {
@@ -47,6 +50,7 @@ export class VaultService {
     private readonly jwtService: JwtService,
     private readonly storageService: StorageService,
     private readonly mediaService: MediaService,
+    private readonly mediaProcessingService: MediaProcessingService,
     private readonly notificationService: NotificationService,
   ) {}
 
@@ -253,8 +257,19 @@ export class VaultService {
         storageKey: input.key,
         caption: input.caption,
         sizeBytes: input.sizeBytes,
+        // Set before the fire-and-forget pass starts — see enums.ts.
+        processingStatus: input.type === 'audio' ? undefined : 'pending',
       })
       .returning();
+    // Private photos get thumbnails, private videos a poster and a streaming
+    // copy — the same pipeline as family memories, fire-and-forget for the
+    // same reason (see MediaProcessingService.processAndPersist).
+    void this.mediaProcessingService.processAndPersist(
+      created.id,
+      created.storageKey,
+      created.type,
+      'vault',
+    );
     return this.toDto(created);
   }
 
@@ -277,11 +292,9 @@ export class VaultService {
     }
 
     await this.db.delete(vaultItems).where(eq(vaultItems.id, id));
-    try {
-      await this.storageService.deleteObject(row.storageKey);
-    } catch {
-      // Best-effort — an orphaned R2 object is cheap, a stuck delete isn't.
-    }
+    // The original and every variant. Best-effort — an orphaned object is
+    // cheap, a stuck delete isn't.
+    await deleteStoredKeys(this.storageService, row);
   }
 
   /**
@@ -342,11 +355,9 @@ export class VaultService {
     });
 
     await this.db.delete(vaultItems).where(eq(vaultItems.id, item.id));
-    try {
-      await this.storageService.deleteObject(item.storageKey);
-    } catch {
-      // Best-effort — an orphaned R2 object is cheap, a stuck move isn't.
-    }
+    // The Milestone's own processing pass makes its variants; the Vault's
+    // copies go with the row. Best-effort, like a delete.
+    await deleteStoredKeys(this.storageService, item);
 
     return created;
   }
@@ -387,21 +398,10 @@ export class VaultService {
 
   /**
    * Vault spec Section 3/5: content here must never be reachable without a
-   * per-request signature — always a short-lived presigned URL, no
-   * unsigned/public serving path, ever.
+   * per-request signature — toVaultItemDto presigns the original and every
+   * variant, with no unsigned/public serving path, ever.
    */
-  private async resolveUrl(storageKey: string): Promise<string> {
-    return this.storageService.generatePresignedDownloadUrl(storageKey);
-  }
-
-  private async toDto(row: typeof vaultItems.$inferSelect): Promise<VaultItem> {
-    return {
-      id: row.id,
-      type: row.type,
-      url: await this.resolveUrl(row.storageKey),
-      caption: row.caption,
-      sizeBytes: row.sizeBytes,
-      createdAt: row.createdAt.toISOString(),
-    };
+  private toDto(row: typeof vaultItems.$inferSelect): Promise<VaultItem> {
+    return toVaultItemDto(this.storageService, row);
   }
 }

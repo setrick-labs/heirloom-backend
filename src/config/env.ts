@@ -92,6 +92,15 @@ export const envSchema = z.object({
   S3_FORCE_PATH_STYLE: booleanString(false),
   S3_BUCKET_NAME: optionalString(z.string().min(1)),
 
+  // The ffmpeg/ffprobe binaries video processing shells out to (see
+  // media/video-transcode.ts). Default to whatever is on PATH — the deploy
+  // image installs both (nixpacks.toml). Without them, videos still upload
+  // and play from the original; they just get no poster or streaming copy.
+  FFMPEG_PATH: optionalString(z.string().min(1)).transform((v) => v ?? 'ffmpeg'),
+  FFPROBE_PATH: optionalString(z.string().min(1)).transform(
+    (v) => v ?? 'ffprobe',
+  ),
+
   // Per-person storage allowance, in bytes. Counts everything a user owns
   // that we have a size for: family-shared media rows plus their private
   // Vault items. Enforced when an upload URL is requested (see

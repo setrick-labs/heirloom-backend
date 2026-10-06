@@ -16,6 +16,7 @@ import {
   milestones,
   reactions,
 } from '../../database/schema';
+import { StorageKeys } from '../../shared/services/storage-keys.util';
 import { StorageService } from '../../shared/services/storage.service';
 import { resolveStoredImageUrl } from '../../shared/utils/cover-url.util';
 import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
@@ -58,6 +59,7 @@ const PREVIEW_THUMBNAILS = 3;
 /** A media row reduced to what a preview thumbnail needs. */
 interface PreviewSource {
   createdAt: Date;
+  type: 'image' | 'video' | 'audio';
   storageKey: string;
   thumbnailStorageKey: string | null;
 }
@@ -116,7 +118,7 @@ export class MilestonesService {
             storageKey: media_.key,
             caption: media_.caption,
             sizeBytes: media_.sizeBytes,
-            processingStatus: media_.type === 'image' ? 'pending' : undefined,
+            processingStatus: media_.type === 'audio' ? undefined : 'pending',
           })
           .returning();
 
@@ -176,6 +178,7 @@ export class MilestonesService {
         // For the card's preview strip. Taken from the query that was already
         // being made rather than a second one — this list is deliberately
         // four queries total for a whole journey, and it stays that way.
+        type: media.type,
         storageKey: media.storageKey,
         thumbnailStorageKey: media.thumbnailStorageKey,
       })
@@ -550,6 +553,7 @@ export class MilestonesService {
         id: media.id,
         createdAt: media.createdAt,
         ownerId: media.ownerId,
+        type: media.type,
         storageKey: media.storageKey,
         thumbnailStorageKey: media.thumbnailStorageKey,
       })
@@ -633,20 +637,19 @@ export class MilestonesService {
   /**
    * Newest first, capped at three.
    *
-   * Falls back to the original key when a thumbnail variant is missing — an
-   * image whose processing pass hasn't run yet, or non-image media — which is
-   * the same fallback MediaService.toDto makes for a single item.
+   * Only memories with something drawable — see StorageKeys.previewImageKey:
+   * an image falls back to its original, but a video without its poster
+   * yet (and any voice note) is skipped rather than handed over as a
+   * broken image.
    */
   private resolvePreviewThumbnails(sources: PreviewSource[]): Promise<string[]> {
     return Promise.all(
       [...sources]
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .map((m) => StorageKeys.previewImageKey(m))
+        .filter((key): key is string => key !== null)
         .slice(0, PREVIEW_THUMBNAILS)
-        .map((m) =>
-          this.storageService.generatePresignedDownloadUrl(
-            m.thumbnailStorageKey ?? m.storageKey,
-          ),
-        ),
+        .map((key) => this.storageService.generatePresignedDownloadUrl(key)),
     );
   }
 

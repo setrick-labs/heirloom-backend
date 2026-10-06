@@ -11,7 +11,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 
-import { timestamps } from './_helpers';
+import { processedVariants, timestamps } from './_helpers';
 import {
   mediaTypeEnum,
   sharedVaultDeletionStatusEnum,
@@ -104,6 +104,7 @@ export const sharedVaultItems = pgTable(
     storageKey: text('storage_key').notNull(),
     caption: varchar('caption', { length: 500 }),
     sizeBytes: bigint('size_bytes', { mode: 'number' }),
+    ...processedVariants,
     ...timestamps,
   },
   (table) => [

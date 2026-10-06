@@ -44,10 +44,15 @@ export const media = pgTable(
     // small to need one, and for rows processed before it existed; clients
     // keep zooming the display variant then.
     zoomStorageKey: text('zoom_storage_key'),
+    // Video only: a full-width still from the clip, shown in the player
+    // before the first frame arrives and as a featured tile. The 240px
+    // thumbStorageKey is too soft at that size. Null for images and audio,
+    // and for videos whose processing hasn't finished.
+    posterStorageKey: text('poster_storage_key'),
     // Compact base83 blurhash string — decoded client-side into an instant
     // placeholder while the real image loads, instead of a blank tile.
     blurhash: text('blurhash'),
-    // Null for non-image media (never processed). See enums.ts for the
+    // Null for audio (never processed). See enums.ts for the
     // pending/done/failed lifecycle.
     processingStatus: mediaProcessingStatusEnum('processing_status'),
     caption: varchar('caption', { length: 500 }),

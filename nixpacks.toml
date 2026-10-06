@@ -11,7 +11,12 @@
 # always populate. Rather than depend on that resolving, this gives the image
 # a working toolchain so compiling succeeds whenever the prebuild is missed.
 #
-# Everything below other than python3/gnumake/gcc is copied verbatim from the
+# ffmpeg-headless is the other addition: video processing shells out to
+# ffmpeg/ffprobe (see src/modules/media/video-transcode.ts). The headless
+# build drops SDL/X11 and still has libx264, AAC and zimg (for HDR tone
+# mapping).
+#
+# Everything below other than python3/gnumake/gcc/ffmpeg-headless is copied verbatim from the
 # plan Nixpacks generated on its own (see "Final Nixpacks plan" in the build
 # log). Declaring `nixPkgs` replaces the auto-detected set, so the overlay and
 # pinned nixpkgs archive have to be restated or pnpm-9_x stops resolving.
@@ -21,6 +26,8 @@ nixPkgs = [
   "nodejs_22",
   "pnpm-9_x",
   "openssl",
+  # --- video processing: poster frames and streaming MP4s (media/video-transcode.ts) ---
+  "ffmpeg-headless",
   # --- needed only to build argon2 from source ---
   "python3",
   "gnumake",

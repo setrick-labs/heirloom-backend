@@ -32,6 +32,11 @@ import {
 import { NotificationService } from '../../shared/services/notification.service';
 import { StorageKeys } from '../../shared/services/storage-keys.util';
 import { StorageService } from '../../shared/services/storage.service';
+import {
+  deleteStoredKeys,
+  resolveVariantUrls,
+} from '../../shared/utils/media-variants.util';
+import { MediaProcessingService } from '../media/media-processing.service';
 import { resolveStoredImageUrl } from '../../shared/utils/cover-url.util';
 import {
   consumeEmailedCode,
@@ -97,6 +102,7 @@ export class SharedVaultsService {
     private readonly jwtService: JwtService,
     private readonly storageService: StorageService,
     private readonly notificationService: NotificationService,
+    private readonly mediaProcessingService: MediaProcessingService,
   ) {}
 
   // ------------------------------------------------------------ list
@@ -525,8 +531,18 @@ export class SharedVaultsService {
         storageKey: input.key,
         caption: input.caption,
         sizeBytes: input.sizeBytes,
+        // Set before the fire-and-forget pass starts — see enums.ts.
+        processingStatus: input.type === 'audio' ? undefined : 'pending',
       })
       .returning();
+    // Same pipeline as family memories and the private Vault: thumbnails for
+    // photos, a poster and streaming copy for videos, private caching.
+    void this.mediaProcessingService.processAndPersist(
+      created.id,
+      created.storageKey,
+      created.type,
+      'sharedVault',
+    );
     return this.toItemDto(created, null);
   }
 
@@ -841,11 +857,9 @@ export class SharedVaultsService {
 
   private async hardDeleteItem(item: SharedVaultItemRow): Promise<void> {
     await this.db.delete(sharedVaultItems).where(eq(sharedVaultItems.id, item.id));
-    try {
-      await this.storageService.deleteObject(item.storageKey);
-    } catch {
-      // Best-effort — an orphaned object is cheap, a stuck delete isn't.
-    }
+    // The original and every variant. Best-effort — an orphaned object is
+    // cheap, a stuck delete isn't.
+    await deleteStoredKeys(this.storageService, item);
   }
 
   private async deleteVaultEntirely(vaultId: string): Promise<void> {
@@ -854,11 +868,7 @@ export class SharedVaultsService {
     });
     // Members, items, requests and votes all cascade from the vault row.
     await this.db.delete(sharedVaults).where(eq(sharedVaults.id, vaultId));
-    await Promise.all(
-      items.map((item) =>
-        this.storageService.deleteObject(item.storageKey).catch(() => undefined),
-      ),
-    );
+    await Promise.all(items.map((item) => deleteStoredKeys(this.storageService, item)));
   }
 
   /** Accepted members who are still in the vault's family. */
@@ -1078,7 +1088,11 @@ export class SharedVaultsService {
     return {
       id: row.id,
       type: row.type,
-      url: await this.storageService.generatePresignedDownloadUrl(row.storageKey),
+      ...(await resolveVariantUrls(this.storageService, row)),
+      blurhash: row.blurhash,
+      width: row.width,
+      height: row.height,
+      durationSeconds: row.durationSeconds,
       caption: row.caption,
       sizeBytes: row.sizeBytes,
       uploaderId: row.uploaderId,

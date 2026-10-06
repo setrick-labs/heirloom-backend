@@ -21,6 +21,8 @@ export const mediaSchema = z.object({
   thumbnailUrl: z.url().nullable().optional(),
   /** Sharper copy for pinch-zoom; null when the display variant is all there is. */
   zoomUrl: z.url().nullable().optional(),
+  /** Video only: a full-width still to show until the first frame plays. */
+  posterUrl: z.url().nullable().optional(),
   blurhash: z.string().nullable().optional(),
   caption: z.string().max(500).nullable().optional(),
   width: z.number().int().positive().nullable().optional(),

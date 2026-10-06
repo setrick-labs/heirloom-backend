@@ -25,6 +25,12 @@ import { StorageService } from '../../shared/services/storage.service';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
 import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
 import { requireMediaOwner } from '../../shared/utils/media-access.util';
+import {
+  copyVariants,
+  deleteStoredKeys,
+  resolveVariantUrls,
+} from '../../shared/utils/media-variants.util';
+import { toVaultItemDto } from '../vault/vault-item.dto';
 import { assertStorageQuota } from '../../shared/utils/storage-quota.util';
 import type { VaultItem } from '../vault/validations/vault.schema';
 import { MediaProcessingService } from './media-processing.service';
@@ -213,7 +219,7 @@ export class MediaService {
             : undefined,
         ownerId,
         // Set before the fire-and-forget pass even starts — see enums.ts.
-        processingStatus: input.type === 'image' ? 'pending' : undefined,
+        processingStatus: input.type === 'audio' ? undefined : 'pending',
       })
       .returning();
 
@@ -423,7 +429,7 @@ export class MediaService {
     try {
       // Every copy, not just the original — the variants used to be left
       // behind in the bucket after the row was gone.
-      await this.deleteStoredCopies(row);
+      await deleteStoredKeys(this.storageService, row);
     } catch (error) {
       // Never let storage cleanup block the DB operation the user is
       // waiting on — an orphaned R2 object is cheap; a stuck delete isn't.
@@ -445,12 +451,8 @@ export class MediaService {
    * — the Vault never shares a storage convention with shared content), so
    * "moving" here means create-then-delete, not a rename.
    *
-   * Only the original object comes along — thumbnail/display variants are
-   * dropped along with the `media` row they belonged to, since the Vault
-   * has no variant concept of its own (`vault/viewer.tsx` reads the
-   * original directly). A fresh set would only ever regenerate if the item
-   * moved back into a Milestone later, at which point moveToMilestone's own
-   * fire-and-forget processing pass produces new ones anyway.
+   * Processed variants are copied too, so a video arrives in the Vault with
+   * its poster and streaming copy rather than queueing for a second encode.
    */
   async moveToVault(userId: string, mediaId: string): Promise<VaultItem> {
     const row = await requireMediaOwner(this.db, userId, mediaId);
@@ -460,6 +462,31 @@ export class MediaService {
       extension: StorageKeys.extensionOf(row.storageKey),
     });
     await this.storageService.copyObject(row.storageKey, destinationKey);
+
+    // Its poster, thumbnails and streaming copy come along as bucket copies.
+    // Re-encoding a video it has already had encoded would be minutes of
+    // CPU for the same bytes. Only if those copies fail (or it was never
+    // processed) does the Vault process the original afresh.
+    let processed: Partial<typeof vaultItems.$inferInsert> = {};
+    let needsProcessing = row.type !== 'audio';
+    if (row.processingStatus === 'done') {
+      try {
+        processed = {
+          ...(await copyVariants(this.storageService, row, destinationKey)),
+          blurhash: row.blurhash,
+          width: row.width,
+          height: row.height,
+          durationSeconds: row.durationSeconds,
+          processingStatus: 'done',
+        };
+        needsProcessing = false;
+      } catch (error) {
+        this.logger.warn(
+          `Failed to copy variants for media ${mediaId} into the Vault: ${error}`,
+        );
+      }
+    }
+    if (needsProcessing) processed = { processingStatus: 'pending' };
 
     const [item] = await this.db.transaction(async (tx) => {
       // Same polymorphic cleanup `delete()` does — the Vault has no
@@ -486,48 +513,30 @@ export class MediaService {
           storageKey: destinationKey,
           caption: row.caption,
           sizeBytes: row.sizeBytes,
+          ...processed,
         })
         .returning();
     });
+    if (needsProcessing) {
+      void this.mediaProcessingService.processAndPersist(
+        item.id,
+        item.storageKey,
+        item.type,
+        'vault',
+      );
+    }
     // Gone from the family's view as surely as a delete.
     this.notificationsGateway.emitRemoved('media', mediaId, userId);
 
     try {
-      await this.deleteStoredCopies(row);
+      await deleteStoredKeys(this.storageService, row);
     } catch (error) {
       this.logger.warn(
         `Failed to delete storage object(s) for moved media ${mediaId}: ${error}`,
       );
     }
 
-    return {
-      id: item.id,
-      type: item.type,
-      url: await this.resolveUrl(item.storageKey),
-      caption: item.caption,
-      sizeBytes: item.sizeBytes,
-      createdAt: item.createdAt.toISOString(),
-    };
-  }
-
-  /** The original and whichever processed variants exist for it. */
-  private async deleteStoredCopies(
-    row: Pick<
-      typeof media.$inferSelect,
-      'storageKey' | 'thumbnailStorageKey' | 'displayStorageKey' | 'zoomStorageKey'
-    >,
-  ): Promise<void> {
-    const keys = [
-      row.storageKey,
-      row.thumbnailStorageKey,
-      row.displayStorageKey,
-      row.zoomStorageKey,
-    ].filter((key): key is string => Boolean(key));
-    for (const key of keys) await this.storageService.deleteObject(key);
-  }
-
-  private async resolveUrl(storageKey: string): Promise<string> {
-    return this.storageService.generatePresignedDownloadUrl(storageKey);
+    return toVaultItemDto(this.storageService, item);
   }
 
   /**
@@ -567,15 +576,12 @@ export class MediaService {
       });
     }
 
-    // Falls back to the original whenever a variant key is unset — non-image
-    // media, or an image whose processing pass failed/hasn't run yet.
-    const [url, thumbnailUrl, zoomUrl] = await Promise.all([
-      this.resolveUrl(row.displayStorageKey ?? row.storageKey),
-      this.resolveUrl(row.thumbnailStorageKey ?? row.storageKey),
-      // No fallback to the original here, unlike the two above: it can be any
-      // size, and decoding it on zoom is exactly the memory spike this avoids.
-      row.zoomStorageKey ? this.resolveUrl(row.zoomStorageKey) : null,
-    ]);
+    // See resolveVariantUrls: a video's thumb never falls back to its
+    // original (a movie), and its url is the streaming copy once it exists.
+    const { url, thumbnailUrl, zoomUrl, posterUrl } = await resolveVariantUrls(
+      this.storageService,
+      row,
+    );
     return {
       id: row.id,
       familyId: row.familyId,
@@ -584,6 +590,7 @@ export class MediaService {
       url,
       thumbnailUrl,
       zoomUrl,
+      posterUrl,
       blurhash: row.blurhash,
       caption: row.caption,
       width: row.width,

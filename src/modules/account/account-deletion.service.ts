@@ -26,6 +26,7 @@ import {
   vaultItems,
 } from '../../database/schema';
 import { StorageService } from '../../shared/services/storage.service';
+import { storedKeysOf } from '../../shared/utils/media-variants.util';
 import { FamiliesService } from '../families/families.service';
 import { SharedVaultsService } from '../shared-vaults/shared-vaults.service';
 
@@ -227,19 +228,21 @@ export class AccountDeletionService {
     }
   }
 
-  /** The private Vault is theirs alone: rows and files both go. */
+  /** The private Vault is theirs alone: rows and files both go — every variant too. */
   private async erasePrivateVault(userId: string): Promise<void> {
     const items = await this.db
       .delete(vaultItems)
       .where(eq(vaultItems.ownerId, userId))
-      .returning({ storageKey: vaultItems.storageKey });
+      .returning();
 
     for (const item of items) {
-      try {
-        await this.storageService.deleteObject(item.storageKey);
-      } catch (error) {
-        // An orphaned object costs storage, not privacy — nothing links to it.
-        this.logger.warn(`Failed to delete vault object ${item.storageKey}: ${error}`);
+      for (const key of storedKeysOf(item)) {
+        try {
+          await this.storageService.deleteObject(key);
+        } catch (error) {
+          // An orphaned object costs storage, not privacy — nothing links to it.
+          this.logger.warn(`Failed to delete vault object ${key}: ${error}`);
+        }
       }
     }
   }

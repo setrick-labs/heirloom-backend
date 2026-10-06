@@ -85,15 +85,35 @@ export const StorageKeys = {
 
   /**
    * Deterministic sibling key for a resized variant of an original object
-   * — same path/uuid, `-{variant}.webp` appended in place of the original
-   * extension. Keeps variants co-located with their original without a
-   * separate lookup table.
+   * — same path/uuid, `-{variant}.{extension}` appended in place of the
+   * original extension. Keeps variants co-located with their original
+   * without a separate lookup table. WebP for every still; a video's
+   * streaming copy passes `mp4`.
    */
-  mediaVariant(originalKey: string, variant: 'thumb' | 'display' | 'zoom'): string {
+  mediaVariant(
+    originalKey: string,
+    variant: 'thumb' | 'display' | 'zoom' | 'poster',
+    extension: 'webp' | 'mp4' = 'webp',
+  ): string {
     const lastDot = originalKey.lastIndexOf('.');
     const withoutExtension =
       lastDot === -1 ? originalKey : originalKey.slice(0, lastDot);
-    return `${withoutExtension}-${variant}.webp`;
+    return `${withoutExtension}-${variant}.${extension}`;
+  },
+
+  /**
+   * The key to draw as a small preview of a memory, or null when there is
+   * nothing drawable yet. An image falls back to its original until its
+   * thumb exists; a video never does — its original is a movie, and handing
+   * that to an image view is a broken tile.
+   */
+  previewImageKey(row: {
+    type: 'image' | 'video' | 'audio';
+    storageKey: string;
+    thumbnailStorageKey: string | null;
+  }): string | null {
+    if (row.thumbnailStorageKey) return row.thumbnailStorageKey;
+    return row.type === 'image' ? row.storageKey : null;
   },
 
   /**

@@ -153,7 +153,16 @@ export type DeletionRequest = z.infer<typeof deletionRequestSchema>;
 export const sharedVaultItemSchema = z.object({
   id: idSchema,
   type: mediaTypeSchema,
+  /** Display variant (streaming MP4 for a video), else the original. */
   url: z.url(),
+  // Same meaning as on a family memory — see media.schema.ts.
+  thumbnailUrl: mediaSchema.shape.thumbnailUrl,
+  zoomUrl: mediaSchema.shape.zoomUrl,
+  posterUrl: mediaSchema.shape.posterUrl,
+  blurhash: mediaSchema.shape.blurhash,
+  width: mediaSchema.shape.width,
+  height: mediaSchema.shape.height,
+  durationSeconds: mediaSchema.shape.durationSeconds,
   caption: mediaSchema.shape.caption,
   sizeBytes: mediaSchema.shape.sizeBytes,
   uploaderId: idSchema.nullable(),

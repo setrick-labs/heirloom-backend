@@ -1,0 +1,1 @@
+ALTER TABLE "media" ADD COLUMN "poster_storage_key" text;

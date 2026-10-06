@@ -6,7 +6,10 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   Injectable,
@@ -17,6 +20,19 @@ import {
 import { env } from '../../config/env';
 
 const DEFAULT_UPLOAD_URL_TTL_SECONDS = 300;
+
+export interface PutOptions {
+  /**
+   * Vault content. Still cached for good by the device that fetched it, but
+   * marked `private` so no shared cache between here and there — a CDN, a
+   * proxy — may keep a copy.
+   */
+  private?: boolean;
+}
+
+function cacheControlFor({ private: isPrivate }: PutOptions): string {
+  return `${isPrivate ? 'private' : 'public'}, max-age=31536000, immutable`;
+}
 const DEFAULT_DOWNLOAD_URL_TTL_SECONDS = 3600;
 
 /**
@@ -169,6 +185,7 @@ export class StorageService {
     key: string,
     body: Buffer,
     contentType: string,
+    options: PutOptions = {},
   ): Promise<void> {
     const { client, bucket } = this.requireClient();
     await client.send(
@@ -180,7 +197,44 @@ export class StorageService {
         // Variant keys are content-addressed (derived from the immutable
         // original's key) and never rewritten in place — safe to cache
         // for as long as a client wants to.
-        CacheControl: 'public, max-age=31536000, immutable',
+        CacheControl: cacheControlFor(options),
+      }),
+    );
+  }
+
+  /**
+   * getObjectBuffer for objects too big to hold in memory — a 300MB video.
+   * Streams the object straight to `path` on local disk; the caller owns
+   * the file and its cleanup.
+   */
+  async downloadToFile(key: string, path: string): Promise<void> {
+    const { client, bucket } = this.requireClient();
+    const result = await client.send(
+      new GetObjectCommand({ Bucket: bucket, Key: key }),
+    );
+    await pipeline(result.Body as Readable, createWriteStream(path));
+  }
+
+  /** putObject from a file on local disk, streamed rather than read into memory. */
+  async putFile(
+    key: string,
+    path: string,
+    contentType: string,
+    options: PutOptions = {},
+  ): Promise<void> {
+    const { client, bucket } = this.requireClient();
+    const { size } = await stat(path);
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: createReadStream(path),
+        // A stream has no length of its own; S3-compatible stores reject a
+        // PUT without one rather than buffer it to find out.
+        ContentLength: size,
+        ContentType: contentType,
+        // Same immutable-variant rule as putObject.
+        CacheControl: cacheControlFor(options),
       }),
     );
   }

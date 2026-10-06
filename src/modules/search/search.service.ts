@@ -9,6 +9,7 @@ import {
   media,
   milestones,
 } from '../../database/schema';
+import { StorageKeys } from '../../shared/services/storage-keys.util';
 import { StorageService } from '../../shared/services/storage.service';
 import { resolveStoredImageUrl } from '../../shared/utils/cover-url.util';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
@@ -97,6 +98,7 @@ export class SearchService {
           journeyId: milestones.journeyId,
           milestoneTitle: milestones.title,
           caption: media.caption,
+          type: media.type,
           storageKey: media.storageKey,
           thumbnailStorageKey: media.thumbnailStorageKey,
           createdAt: media.createdAt,
@@ -136,13 +138,12 @@ export class SearchService {
         ),
       ),
       Promise.all(
-        mediaRows.map((row) =>
-          this.storageService.generatePresignedDownloadUrl(
-            // Falls back to the original when the thumbnail variant hasn't
-            // been generated yet, as MediaService.toDto does.
-            row.thumbnailStorageKey ?? row.storageKey,
-          ),
-        ),
+        mediaRows.map((row) => {
+          // An image falls back to its original until its thumb exists; a
+          // video without a poster yet has no image to show at all.
+          const key = StorageKeys.previewImageKey(row);
+          return key ? this.storageService.generatePresignedDownloadUrl(key) : null;
+        }),
       ),
     ]);
 

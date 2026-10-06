@@ -48,8 +48,9 @@ export const journeyVisibilityEnum = pgEnum('journey_visibility', [
 export const mediaTypeEnum = pgEnum('media_type', ['image', 'video', 'audio']);
 
 /**
- * Tracks the async variant/blurhash pass (see MediaProcessingService).
- * Null for non-image media, which is never processed. Set to 'pending' at
+ * Tracks the async variant/blurhash pass (see MediaProcessingService) —
+ * resized stills for an image; a poster and a streaming MP4 for a video.
+ * Null for audio, which is never processed. Set to 'pending' at
  * insert time — before the fire-and-forget pass even starts — so a crash
  * mid-processing leaves a visibly stuck row instead of one indistinguishable
  * from "not applicable"; scripts/retry-failed-media.ts queries for both
