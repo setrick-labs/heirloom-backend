@@ -1,12 +1,26 @@
-import { Controller, Get, Patch, Body } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Patch,
+  Post,
+} from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 
 import {
   CurrentUser,
   type AuthenticatedUser,
 } from '../../shared/guards/current-user.decorator';
 import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
+import { apiResponse } from '../../shared/types/api-response';
 import { UsersService } from './users.service';
 import {
+  type AddEmailInput,
+  addEmailInputSchema,
+  type ConfirmEmailInput,
+  confirmEmailInputSchema,
   type SwitchActiveFamilyInput,
   switchActiveFamilyInputSchema,
   type UpdateNotificationPreferencesInput,
@@ -51,6 +65,28 @@ export class UsersController {
     @Body(new ZodValidationPipe(updateUserInputSchema)) body: UpdateUserInput,
   ) {
     return this.usersService.update(user.id, body);
+  }
+
+  /** Phone-only accounts: send a code to the address being added. */
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @Post('me/email')
+  async addEmail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(addEmailInputSchema)) body: AddEmailInput,
+  ) {
+    await this.usersService.requestAddEmail(user.id, body);
+    return apiResponse('Check your inbox for a 6-digit code.');
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('me/email/confirm')
+  confirmEmail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(confirmEmailInputSchema))
+    body: ConfirmEmailInput,
+  ) {
+    return this.usersService.confirmAddEmail(user.id, body);
   }
 
   /** Section 6: switch which family workspace is active. */

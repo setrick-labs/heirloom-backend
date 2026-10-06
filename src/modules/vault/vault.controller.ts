@@ -7,6 +7,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 
 import {
   type AuthenticatedUser,
@@ -27,6 +28,8 @@ import {
   requestVaultUploadUrlInputSchema,
   type SetupVaultInput,
   setupVaultInputSchema,
+  type StartVaultRecoveryInput,
+  startVaultRecoveryInputSchema,
   type UnlockVaultInput,
   unlockVaultInputSchema,
 } from './validations/vault.schema';
@@ -59,6 +62,20 @@ export class VaultController {
     return apiResponse(session, 'Vault unlocked');
   }
 
+  /** Step 1 of recovery: checks the account password, emails a code. */
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @Post('recover/start')
+  async startRecovery(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(startVaultRecoveryInputSchema))
+    body: StartVaultRecoveryInput,
+  ) {
+    const started = await this.vaultService.startRecovery(user.id, body);
+    return apiResponse(started, 'Recovery code sent');
+  }
+
+  /** Step 2: the emailed code and the new passcode. */
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('recover')
   async recover(
     @CurrentUser() user: AuthenticatedUser,

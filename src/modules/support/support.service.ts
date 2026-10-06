@@ -107,6 +107,7 @@ export class SupportService {
       to,
       subject: email.subject,
       body: email.body,
+      html: email.html,
       logLabel: 'support request',
       // The reporter's own words go in the body; only the image is attached.
       attachments: screenshot

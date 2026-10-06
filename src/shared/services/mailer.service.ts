@@ -6,7 +6,14 @@ import { env } from '../../config/env';
 export interface OutboundEmail {
   to: string;
   subject: string;
+  /** Plain-text part. Always sent — spam filters and text-only clients read it. */
   body: string;
+  /**
+   * HTML part (see email-layout.ts). Sent alongside `body` as a
+   * multipart/alternative message, so a client that can't render it still
+   * has the full text.
+   */
+  html?: string;
   /**
    * What to call this message in the logs.
    *
@@ -100,6 +107,7 @@ export class MailerService {
         to: email.to,
         subject: email.subject,
         text: email.body,
+        html: email.html,
         attachments: email.attachments,
       });
       this.logger.log(`Sent ${email.logLabel} to ${email.to}`);

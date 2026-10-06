@@ -124,7 +124,21 @@ export const envSchema = z.object({
     .int()
     .positive()
     .default(30),
+  // Emailed second factor for a forgotten Vault / shared-vault passcode.
+  VAULT_RECOVERY_CODE_TTL_MINUTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(15),
+  // Wrong entries allowed against one emailed code (reset, verification,
+  // vault recovery) before it is burned. Per-IP throttling alone lets a
+  // distributed guesser work through a 6-digit space; this caps it per code.
+  AUTH_CODE_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   FAMILY_INVITE_TTL_DAYS: z.coerce.number().int().positive().default(7),
+  // Single-use invites sent to an email address (Invite by email).
+  FAMILY_EMAIL_INVITE_TTL_DAYS: z.coerce.number().int().positive().default(7),
+  // Abuse cap: invite emails leave from our domain to addresses a user typed.
+  FAMILY_EMAIL_INVITES_PER_DAY: z.coerce.number().int().positive().default(25),
   FAMILY_DELETION_GRACE_PERIOD_DAYS: z.coerce
     .number()
     .int()
@@ -189,6 +203,29 @@ export const envSchema = z.object({
   // (Screen 40's "See Your Gift" CTA) build on this. Optional: without it
   // the email still explains the gift, it just can't offer a one-tap link.
   APP_LINK_BASE_URL: optionalString(z.string().url()),
+
+  // The public web app. Emails link to its help/privacy pages, and any page a
+  // token-bearing email link lands on (family invites) lives here too.
+  WEB_BASE_URL: z.string().url().default('https://heirloom.setrick.com'),
+
+  // Where HTML emails load their images from (logo, store badges). Hosted by
+  // the web app under public/email — PNGs, because Gmail strips SVG.
+  EMAIL_ASSET_BASE_URL: z
+    .string()
+    .url()
+    .default('https://heirloom.setrick.com/email'),
+
+  // Store listings for the "Get the app" badges in email footers.
+  APP_STORE_URL: z
+    .string()
+    .url()
+    .default('https://apps.apple.com/app/heirloom/id6814822255'),
+  PLAY_STORE_URL: z
+    .string()
+    .url()
+    .default(
+      'https://play.google.com/store/apps/details?id=com.ahmedtahir2311.heirloom',
+    ),
 
   // Base URL used to build shareable family-invite links, e.g.
   // "https://heirloom.app/join" -> "https://heirloom.app/join?code=123456".

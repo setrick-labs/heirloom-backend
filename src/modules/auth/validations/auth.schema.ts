@@ -13,14 +13,17 @@ const IDENTIFIER_ISSUE = {
   path: ['email'],
 };
 
-export const signUpInputSchema = z
-  .object({
-    email: z.email().optional(),
-    phone: z.string().min(7).max(20).optional(),
-    password: z.string().min(8).max(72),
-    name: z.string().min(1).max(120),
-  })
-  .refine(hasIdentifier, IDENTIFIER_ISSUE);
+/**
+ * Email is required: it is the only channel we can deliver to (there is no
+ * SMS provider), so an account without one could never recover its password
+ * or Vault. Phone stays as optional contact detail and a sign-in identifier.
+ */
+export const signUpInputSchema = z.object({
+  email: z.email(),
+  phone: z.string().min(7).max(20).optional(),
+  password: z.string().min(8).max(72),
+  name: z.string().min(1).max(120),
+});
 export type SignUpInput = z.infer<typeof signUpInputSchema>;
 
 export const signInInputSchema = z

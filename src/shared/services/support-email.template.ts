@@ -1,4 +1,5 @@
 import type { EmailContent } from './auth-email.template';
+import { renderEmail } from './email-layout';
 
 export interface SupportRequestDetails {
   title: string;
@@ -34,5 +35,14 @@ export function buildSupportRequestEmail(
   return {
     subject: `[Heirloom support] ${request.title}`,
     body: [request.details, '', '---', ...context].join('\n'),
+    // Same shell as user-facing mail so the inbox stays recognisable; the
+    // reporter's text is escaped by renderEmail like any other user input.
+    html: renderEmail({
+      preheader: request.details.slice(0, 120),
+      eyebrow: 'Support request',
+      heading: request.title,
+      paragraphs: request.details.split(/\n{2,}/),
+      notes: context,
+    }),
   };
 }

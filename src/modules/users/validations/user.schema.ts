@@ -52,6 +52,19 @@ export const updateUserInputSchema = userSchema
   });
 export type UpdateUserInput = z.infer<typeof updateUserInputSchema>;
 
+/**
+ * Adding an email to an account that has none (phone-only sign-ups from
+ * before email became required). Two steps — request, then confirm the code
+ * sent to the new address — so nobody can attach an inbox they don't own.
+ */
+export const addEmailInputSchema = z.object({ email: z.email() });
+export type AddEmailInput = z.infer<typeof addEmailInputSchema>;
+
+export const confirmEmailInputSchema = z.object({
+  code: z.string().length(6).regex(/^\d+$/, 'Enter the 6-digit code'),
+});
+export type ConfirmEmailInput = z.infer<typeof confirmEmailInputSchema>;
+
 export const switchActiveFamilyInputSchema = z.object({
   familyId: idSchema,
 });

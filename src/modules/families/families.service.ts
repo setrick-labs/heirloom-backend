@@ -534,39 +534,46 @@ export class FamiliesService {
 
   async joinViaInvite(userId: string, input: JoinFamilyInput): Promise<Family> {
     const invite = await this.findActiveInvite(input.code);
+    return this.joinFamily(userId, invite.familyId);
+  }
 
+  /**
+   * Adds the user to the family and makes it their active one. Shared by
+   * both invite paths (shared code, emailed link).
+   */
+  async joinFamily(userId: string, familyId: string): Promise<Family> {
     const existingMembership = await getFamilyMembership(
       this.db,
       userId,
-      invite.familyId,
+      familyId,
     );
     if (!existingMembership) {
       await this.db.transaction(async (tx) => {
         await tx.insert(familyMembers).values({
-          familyId: invite.familyId,
+          familyId,
           userId,
           role: 'member',
         });
         await tx
           .update(users)
-          .set({ activeFamilyId: invite.familyId })
+          .set({ activeFamilyId: familyId })
           .where(eq(users.id, userId));
       });
 
       // Only on a genuine first join — the idempotent branch below is
       // someone re-entering a family they are already in, which is not news
       // to anybody.
-      void this.announceJoin(userId, invite.familyId);
+      void this.announceJoin(userId, familyId);
     } else {
       // Idempotent: joining twice (or via two invite paths) just drops them
       // into the family, no error, no duplicate membership.
       await this.db
         .update(users)
-        .set({ activeFamilyId: invite.familyId })
+        .set({ activeFamilyId: familyId })
         .where(eq(users.id, userId));
     }
 
-    return this.findById(invite.familyId);
+    return this.findById(familyId);
   }
 
   /** "Sam joined the family" — to everyone already in it. */
@@ -627,7 +634,7 @@ export class FamiliesService {
     }
   }
 
-  private async requireAdmin(userId: string, familyId: string): Promise<void> {
+  async requireAdmin(userId: string, familyId: string): Promise<void> {
     const membership = await getFamilyMembership(this.db, userId, familyId);
     if (
       !membership ||

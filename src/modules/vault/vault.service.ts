@@ -14,8 +14,14 @@ import { env } from '../../config/env';
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
 import { journeys, milestones, users, vaultItems } from '../../database/schema';
+import { NotificationService } from '../../shared/services/notification.service';
 import { StorageKeys } from '../../shared/services/storage-keys.util';
 import { StorageService } from '../../shared/services/storage.service';
+import {
+  consumeEmailedCode,
+  issueEmailedCode,
+} from '../../shared/utils/emailed-code.util';
+import { maskEmail } from '../../shared/utils/mask-email.util';
 import { requireJourneyAccess } from '../../shared/utils/journey-access.util';
 import { sessionCutoff } from '../../shared/utils/session-cutoff.util';
 import { assertStorageQuota } from '../../shared/utils/storage-quota.util';
@@ -26,8 +32,10 @@ import {
   CreateVaultItemInput,
   RecoverVaultInput,
   SetupVaultInput,
+  StartVaultRecoveryInput,
   UnlockVaultInput,
   VaultItem,
+  VaultRecoveryStarted,
   VaultSession,
   VaultStatus,
 } from './validations/vault.schema';
@@ -39,6 +47,7 @@ export class VaultService {
     private readonly jwtService: JwtService,
     private readonly storageService: StorageService,
     private readonly mediaService: MediaService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async status(userId: string): Promise<VaultStatus> {
@@ -146,22 +155,48 @@ export class VaultService {
   }
 
   /**
-   * Section 6: forgotten Vault password, recovered through account-level
-   * re-authentication rather than a truly unrecoverable secret — a
-   * deliberate security-vs-usability tradeoff, not an oversight.
+   * Section 6, step 1: forgotten Vault password. Recoverable rather than a
+   * truly unrecoverable secret — a deliberate security-vs-usability
+   * tradeoff — but it takes two factors: the account password here, then
+   * the emailed code in `recover`.
    */
+  async startRecovery(
+    userId: string,
+    input: StartVaultRecoveryInput,
+  ): Promise<VaultRecoveryStarted> {
+    const user = await this.requireUser(userId);
+    if (!(await argon2.verify(user.passwordHash, input.accountPassword))) {
+      throw new UnauthorizedException('Incorrect account password');
+    }
+    if (!user.email) {
+      throw new ConflictException({
+        code: 'EMAIL_REQUIRED',
+        message: 'Add an email address to your account to recover your Vault.',
+      });
+    }
+    const code = await issueEmailedCode(this.db, {
+      userId,
+      type: 'vault_recovery',
+      ttlMinutes: env.VAULT_RECOVERY_CODE_TTL_MINUTES,
+    });
+    await this.notificationService.sendVaultRecoveryCode(user.email, code);
+    return {
+      sentTo: maskEmail(user.email),
+      expiresInMinutes: env.VAULT_RECOVERY_CODE_TTL_MINUTES,
+    };
+  }
+
+  /** Section 6, step 2: the emailed code, then the new passcode. */
   async recover(
     userId: string,
     input: RecoverVaultInput,
   ): Promise<VaultSession> {
     const user = await this.requireUser(userId);
-    const accountPasswordMatches = await argon2.verify(
-      user.passwordHash,
-      input.accountPassword,
-    );
-    if (!accountPasswordMatches) {
-      throw new UnauthorizedException('Incorrect account password');
-    }
+    await consumeEmailedCode(this.db, {
+      userId,
+      type: 'vault_recovery',
+      code: input.code,
+    });
     await this.assertDistinctFromAccountPassword(
       user.passwordHash,
       input.newVaultPassword,
@@ -185,6 +220,7 @@ export class VaultService {
       })
       .where(eq(users.id, userId));
 
+    await this.notificationService.sendVaultPasscodeReset(user);
     return this.issueVaultSession(userId);
   }
 

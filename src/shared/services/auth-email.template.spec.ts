@@ -26,10 +26,11 @@ describe('buildPasswordResetEmail', () => {
   });
 
   it('always gives the recipient something actionable', () => {
-    // The reset code is typed back into the app by hand, so the body is the
-    // only place it can live — there is no link, by design.
-    const body = buildPasswordResetEmail('482913').body;
-    expect(body).toContain('482913');
+    // The code is always in the body: the one-tap link is a convenience that
+    // only works on a phone with the app, and only when links are configured.
+    const email = buildPasswordResetEmail('482913');
+    expect(email.body).toContain('482913');
+    expect(email.html).toContain('482913');
   });
 
   it('reassures someone who did not request it', () => {
@@ -40,5 +41,21 @@ describe('buildPasswordResetEmail', () => {
     const body = buildPasswordResetEmail('t').body;
     expect(body).toMatch(/expires in \d+ minutes/);
     expect(body).toContain('once');
+  });
+});
+
+describe('HTML parts', () => {
+  it('every auth email ships an HTML part alongside the text one', () => {
+    for (const email of [
+      buildVerificationEmail('482913'),
+      buildPasswordResetEmail('482913'),
+    ]) {
+      expect(email.html).toContain('<!DOCTYPE html>');
+      expect(email.body.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps store badges out of security mail', () => {
+    expect(buildPasswordResetEmail('482913').html).not.toContain('app-store.png');
   });
 });

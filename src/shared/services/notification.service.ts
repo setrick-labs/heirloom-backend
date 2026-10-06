@@ -9,18 +9,25 @@ import {
   type NotificationCategory,
 } from '../utils/notification-audience.util';
 import {
+  buildConfirmEmailEmail,
+  buildPasswordChangedEmail,
   buildPasswordResetEmail,
+  buildVaultPasscodeResetEmail,
+  buildVaultRecoveryEmail,
   buildVerificationEmail,
+  type EmailContent,
 } from './auth-email.template';
 import {
   buildGiftInviteEmail,
   buildGiftUnlockedEmail,
 } from './gift-email.template';
+import { buildFamilyInviteEmail } from './family-email.template';
 import { MailerService } from './mailer.service';
 import { NotificationFeedService } from './notification-feed.service';
 import { NotificationsGateway } from './notifications.gateway';
 import {
   buildCommentPush,
+  buildFamilyInvitePush,
   buildFamilyJoinPush,
   buildGiftUnlockedPush,
   buildNewMemoryPush,
@@ -118,6 +125,7 @@ export class NotificationService {
       to: identifier,
       subject: email.subject,
       body: email.body,
+      html: email.html,
       logLabel: 'verification code',
     });
   }
@@ -126,7 +134,10 @@ export class NotificationService {
     identifier: string,
     token: string,
   ): Promise<void> {
-    const email = buildPasswordResetEmail(token);
+    const email = buildPasswordResetEmail(
+      token,
+      this.isEmail(identifier) ? identifier : undefined,
+    );
 
     if (!this.isEmail(identifier)) {
       this.logger.warn(
@@ -139,8 +150,78 @@ export class NotificationService {
       to: identifier,
       subject: email.subject,
       body: email.body,
+      html: email.html,
       logLabel: 'password reset link',
     });
+  }
+
+  /**
+   * Security mail to an address already on the account. Skipped (with a log
+   * line) for phone-only accounts, which have nowhere to send it.
+   */
+  private async sendSecurityEmail(
+    to: string | null,
+    email: EmailContent,
+    logLabel: string,
+  ): Promise<void> {
+    if (!to) {
+      this.logger.warn(`Skipped ${logLabel}: account has no email address`);
+      return;
+    }
+    await this.mailer.send({
+      to,
+      subject: email.subject,
+      body: email.body,
+      html: email.html,
+      logLabel,
+    });
+  }
+
+  async sendConfirmEmailCode(to: string, code: string): Promise<void> {
+    await this.sendSecurityEmail(
+      to,
+      buildConfirmEmailEmail(code),
+      'email confirmation code',
+    );
+  }
+
+  async sendPasswordChanged(user: {
+    email: string | null;
+    name: string;
+  }): Promise<void> {
+    await this.sendSecurityEmail(
+      user.email,
+      buildPasswordChangedEmail({ name: user.name, when: new Date() }),
+      'password changed alert',
+    );
+  }
+
+  /** `vaultName` set = a shared vault; unset = the personal Private Vault. */
+  async sendVaultRecoveryCode(
+    to: string | null,
+    code: string,
+    vaultName?: string,
+  ): Promise<void> {
+    await this.sendSecurityEmail(
+      to,
+      buildVaultRecoveryEmail({ code, vaultName }),
+      'vault recovery code',
+    );
+  }
+
+  async sendVaultPasscodeReset(
+    user: { email: string | null; name: string },
+    vaultName?: string,
+  ): Promise<void> {
+    await this.sendSecurityEmail(
+      user.email,
+      buildVaultPasscodeResetEmail({
+        name: user.name,
+        when: new Date(),
+        vaultName,
+      }),
+      'vault passcode reset alert',
+    );
   }
 
   /**
@@ -163,6 +244,7 @@ export class NotificationService {
       to: recipientEmail,
       subject: email.subject,
       body: email.body,
+      html: email.html,
       logLabel: 'gift invite',
     });
   }
@@ -178,6 +260,7 @@ export class NotificationService {
       to: recipientEmail,
       subject: email.subject,
       body: email.body,
+      html: email.html,
       logLabel: 'gift unlocked notice',
     });
   }
@@ -300,6 +383,35 @@ export class NotificationService {
   }
 
   /** Someone joined a family you're in. */
+  /** Emailed family invite, delivered to an existing account's email and phone. */
+  async sendFamilyInvite(input: {
+    to: string;
+    inviterName: string;
+    familyName: string;
+    memberCount: number;
+    url: string;
+    /** Set when the address already belongs to an account — they get a push too. */
+    existingUserId?: string;
+    inviteId: string;
+  }): Promise<void> {
+    const email = buildFamilyInviteEmail(input);
+    await this.mailer.send({
+      to: input.to,
+      subject: email.subject,
+      body: email.body,
+      html: email.html,
+      logLabel: 'family invite',
+    });
+    if (input.existingUserId) {
+      await this.pushToAudience(
+        [input.existingUserId],
+        'invites',
+        buildFamilyInvitePush(input),
+        'family invite',
+      );
+    }
+  }
+
   async pushFamilyJoin(input: {
     actorId: string;
     actorName: string;

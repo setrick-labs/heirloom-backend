@@ -9,18 +9,18 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
-import { and, eq, gt, isNull, or, type SQL } from 'drizzle-orm';
+import { eq, or, type SQL } from 'drizzle-orm';
 
 import { env } from '../../config/env';
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
-import { authTokens, users } from '../../database/schema';
+import { users } from '../../database/schema';
 import { NotificationService } from '../../shared/services/notification.service';
 import { asDuration } from '../../shared/types/duration';
 import {
-  generateNumericCode,
-  hashToken,
-} from '../../shared/utils/auth-tokens.util';
+  consumeEmailedCode,
+  issueEmailedCode,
+} from '../../shared/utils/emailed-code.util';
 import { resolveActiveFamilyId } from '../../shared/utils/family-membership.util';
 import { GiftsService } from '../gifts/gifts.service';
 import { UsersService } from '../users/users.service';
@@ -109,26 +109,11 @@ export class AuthService {
       throw new UnauthorizedException('Invalid verification code');
     }
 
-    const tokenHash = hashToken(input.code);
-    const record = await this.db.query.authTokens.findFirst({
-      where: and(
-        eq(authTokens.userId, user.id),
-        eq(authTokens.type, 'account_verification'),
-        eq(authTokens.tokenHash, tokenHash),
-        isNull(authTokens.usedAt),
-        gt(authTokens.expiresAt, new Date()),
-      ),
+    await consumeEmailedCode(this.db, {
+      userId: user.id,
+      type: 'account_verification',
+      code: input.code,
     });
-    if (!record) {
-      throw new UnauthorizedException(
-        'This code is invalid or has expired. Request a new one.',
-      );
-    }
-
-    await this.db
-      .update(authTokens)
-      .set({ usedAt: new Date() })
-      .where(eq(authTokens.id, record.id));
 
     const [activated] = await this.db
       .update(users)
@@ -219,31 +204,14 @@ export class AuthService {
       return;
     }
 
-    // "Only the most recent token should be valid" — invalidate any
-    // outstanding reset tokens before minting a new one.
-    await this.db
-      .update(authTokens)
-      .set({ usedAt: new Date() })
-      .where(
-        and(
-          eq(authTokens.userId, user.id),
-          eq(authTokens.type, 'password_reset'),
-          isNull(authTokens.usedAt),
-        ),
-      );
-
     // A 6-digit code rather than an opaque token: it arrives by email and is
     // typed back in by hand, so it has to be short enough to read off a
-    // screen. Scoped per user at verification time, which is what keeps a
-    // million-value space safe — see resetPassword.
-    const rawToken = generateNumericCode();
-    await this.db.insert(authTokens).values({
+    // screen. Scoped per user and capped on wrong guesses, which is what
+    // keeps a million-value space safe — see emailed-code.util.ts.
+    const rawToken = await issueEmailedCode(this.db, {
       userId: user.id,
       type: 'password_reset',
-      tokenHash: hashToken(rawToken),
-      expiresAt: new Date(
-        Date.now() + env.PASSWORD_RESET_TOKEN_TTL_MINUTES * 60_000,
-      ),
+      ttlMinutes: env.PASSWORD_RESET_TOKEN_TTL_MINUTES,
     });
 
     await this.notificationService.sendPasswordResetLink(
@@ -263,52 +231,30 @@ export class AuthService {
       );
     }
 
-    const record = await this.db.query.authTokens.findFirst({
-      where: and(
-        eq(authTokens.userId, user.id),
-        eq(authTokens.type, 'password_reset'),
-        eq(authTokens.tokenHash, hashToken(input.code)),
-      ),
+    await consumeEmailedCode(this.db, {
+      userId: user.id,
+      type: 'password_reset',
+      code: input.code,
     });
-
-    if (!record) {
-      throw new UnauthorizedException(
-        'This code is invalid or has expired. Request a new one.',
-      );
-    }
-    if (record.usedAt) {
-      throw new UnauthorizedException(
-        'This code has already been used. Request a new one.',
-      );
-    }
-    if (record.expiresAt <= new Date()) {
-      throw new UnauthorizedException(
-        'This code has expired. Request a new one.',
-      );
-    }
 
     const passwordHash = await argon2.hash(input.newPassword);
     const now = new Date();
 
-    await this.db.transaction(async (tx) => {
-      await tx
-        .update(authTokens)
-        .set({ usedAt: now })
-        .where(eq(authTokens.id, record.id));
-      await tx
-        .update(users)
-        .set({
-          passwordHash,
-          // Locks the attacker out immediately: any already-issued access
-          // or refresh token with iat before this is rejected (see
-          // JwtStrategy.validate and AuthService.refresh).
-          sessionsInvalidatedAt: now,
-          failedLoginAttempts: 0,
-          lockedUntil: null,
-          updatedAt: now,
-        })
-        .where(eq(users.id, user.id));
-    });
+    await this.db
+      .update(users)
+      .set({
+        passwordHash,
+        // Locks the attacker out immediately: any already-issued access
+        // or refresh token with iat before this is rejected (see
+        // JwtStrategy.validate and AuthService.refresh).
+        sessionsInvalidatedAt: now,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        updatedAt: now,
+      })
+      .where(eq(users.id, user.id));
+
+    await this.notificationService.sendPasswordChanged(user);
   }
 
   /**
@@ -351,6 +297,8 @@ export class AuthService {
         updatedAt: now,
       })
       .where(eq(users.id, userId));
+
+    await this.notificationService.sendPasswordChanged(user);
   }
 
   async refresh(refreshToken: string): Promise<AuthTokens> {
@@ -385,27 +333,11 @@ export class AuthService {
   }
 
   private async issueVerificationCode(user: UserRow): Promise<void> {
-    // Only one live code at a time — matches the reset-token rule ("only
-    // the most recent is valid") so resending never leaves an old code usable.
-    await this.db
-      .update(authTokens)
-      .set({ usedAt: new Date() })
-      .where(
-        and(
-          eq(authTokens.userId, user.id),
-          eq(authTokens.type, 'account_verification'),
-          isNull(authTokens.usedAt),
-        ),
-      );
-
-    const code = generateNumericCode(6);
-    await this.db.insert(authTokens).values({
+    // Only one live code at a time, so resending never leaves an old code usable.
+    const code = await issueEmailedCode(this.db, {
       userId: user.id,
       type: 'account_verification',
-      tokenHash: hashToken(code),
-      expiresAt: new Date(
-        Date.now() + env.ACCOUNT_VERIFICATION_CODE_TTL_MINUTES * 60_000,
-      ),
+      ttlMinutes: env.ACCOUNT_VERIFICATION_CODE_TTL_MINUTES,
     });
 
     const identifier = user.email ?? user.phone ?? user.id;

@@ -95,8 +95,16 @@ export type ChangeSharedVaultPasscodeInput = z.infer<
 >;
 
 /** Forgotten passcode: re-prove the account, same trade-off as the personal Vault. */
-export const recoverSharedVaultInputSchema = z.object({
+/** Same two factors as the personal Vault: account password, then an emailed code. */
+export const startSharedVaultRecoveryInputSchema = z.object({
   accountPassword: z.string().min(1),
+});
+export type StartSharedVaultRecoveryInput = z.infer<
+  typeof startSharedVaultRecoveryInputSchema
+>;
+
+export const recoverSharedVaultInputSchema = z.object({
+  code: z.string().length(6).regex(/^\d+$/, 'Enter the 6-digit code'),
   newPasscode: passcodeSchema,
 });
 export type RecoverSharedVaultInput = z.infer<

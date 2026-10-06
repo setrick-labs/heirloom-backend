@@ -24,10 +24,19 @@ export const userStatusEnum = pgEnum('user_status', [
   'deleted',
 ]);
 
-/** What an auth_tokens row is for — one table backs both flows since both are "single-use, time-limited, delivered out of band". */
+/**
+ * What an auth_tokens row is for — one table backs every emailed code since
+ * they are all "single-use, time-limited, delivered out of band".
+ * `vault_recovery` / `shared_vault_recovery` are the emailed second factor
+ * for a forgotten passcode; `email_change` confirms a new address (how a
+ * phone-only account gets an email to recover through).
+ */
 export const authTokenTypeEnum = pgEnum('auth_token_type', [
   'account_verification',
   'password_reset',
+  'vault_recovery',
+  'shared_vault_recovery',
+  'email_change',
 ]);
 
 /** Whether a journey is visible to the whole family or only journey_members. */

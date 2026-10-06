@@ -39,9 +39,28 @@ export const unlockVaultInputSchema = z.object({
 });
 export type UnlockVaultInput = z.infer<typeof unlockVaultInputSchema>;
 
-/** Section 6: forgotten vault password, recovered via account-level re-authentication. */
-export const recoverVaultInputSchema = z.object({
+/**
+ * Section 6: forgotten vault password — two factors. Step 1 proves the
+ * account password and emails a code; step 2 proves the inbox. The account
+ * password alone is not enough: the Vault exists to keep out someone holding
+ * your unlocked phone, and that phone often has the password saved.
+ */
+export const startVaultRecoveryInputSchema = z.object({
   accountPassword: z.string().min(1),
+});
+export type StartVaultRecoveryInput = z.infer<
+  typeof startVaultRecoveryInputSchema
+>;
+
+export const vaultRecoveryStartedSchema = z.object({
+  /** Masked, e.g. "a***@gmail.com" — enough to know which inbox to open. */
+  sentTo: z.string(),
+  expiresInMinutes: z.number().int().positive(),
+});
+export type VaultRecoveryStarted = z.infer<typeof vaultRecoveryStartedSchema>;
+
+export const recoverVaultInputSchema = z.object({
+  code: z.string().length(6).regex(/^\d+$/, 'Enter the 6-digit code'),
   newVaultPassword: vaultPasswordSchema,
 });
 export type RecoverVaultInput = z.infer<typeof recoverVaultInputSchema>;

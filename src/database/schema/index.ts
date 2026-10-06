@@ -3,6 +3,7 @@ export * from './users';
 export * from './families';
 export * from './family-members';
 export * from './family-invites';
+export * from './family-email-invites';
 export * from './auth-tokens';
 export * from './aliases';
 export * from './journeys';

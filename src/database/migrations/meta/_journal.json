@@ -148,6 +148,13 @@
       "when": 1790364887101,
       "tag": "0020_user_status_deleted",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790776913274,
+      "tag": "0021_email_invites_and_recovery_codes",
+      "breakpoints": true
     }
   ]
 }

@@ -1,16 +1,23 @@
 import {
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 
+import { env } from '../../config/env';
 import { DATABASE_CONNECTION } from '../../database/database.module';
 import type { Database } from '../../database/connection';
 import { users } from '../../database/schema';
+import { NotificationService } from '../../shared/services/notification.service';
 import { StorageService } from '../../shared/services/storage.service';
 import { resolveStoredImageUrl } from '../../shared/utils/cover-url.util';
+import {
+  consumeEmailedCode,
+  issueEmailedCode,
+} from '../../shared/utils/emailed-code.util';
 import {
   getFamilyMembership,
   isActiveFamilyMember,
@@ -21,6 +28,8 @@ import {
   type StorageUsage,
 } from '../../shared/utils/storage-quota.util';
 import {
+  AddEmailInput,
+  ConfirmEmailInput,
   NotificationPreferences,
   SwitchActiveFamilyInput,
   UpdateNotificationPreferencesInput,
@@ -33,7 +42,59 @@ export class UsersService {
   constructor(
     @Inject(DATABASE_CONNECTION) private readonly db: Database,
     private readonly storageService: StorageService,
+    private readonly notificationService: NotificationService,
   ) {}
+
+  /** Step 1 of adding an email to an account that has none. */
+  async requestAddEmail(id: string, input: AddEmailInput): Promise<void> {
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.id, id),
+    });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.email) {
+      throw new ConflictException('This account already has an email address.');
+    }
+    const email = input.email.trim();
+    const taken = await this.db.query.users.findFirst({
+      where: eq(users.email, email),
+    });
+    if (taken) {
+      throw new ConflictException({
+        code: 'IDENTIFIER_ALREADY_EXISTS',
+        message: 'Another account already uses this email address.',
+      });
+    }
+    const code = await issueEmailedCode(this.db, {
+      userId: id,
+      type: 'email_change',
+      ttlMinutes: env.ACCOUNT_VERIFICATION_CODE_TTL_MINUTES,
+      email,
+    });
+    await this.notificationService.sendConfirmEmailCode(email, code);
+  }
+
+  /** Step 2: the code proves the inbox; only then is the address attached. */
+  async confirmAddEmail(id: string, input: ConfirmEmailInput): Promise<User> {
+    const record = await consumeEmailedCode(this.db, {
+      userId: id,
+      type: 'email_change',
+      code: input.code,
+    });
+    if (!record.email) throw new NotFoundException('Nothing to confirm');
+    try {
+      await this.db
+        .update(users)
+        .set({ email: record.email, updatedAt: new Date() })
+        .where(and(eq(users.id, id), isNull(users.email)));
+    } catch {
+      // Unique violation: someone else claimed the address meanwhile.
+      throw new ConflictException({
+        code: 'IDENTIFIER_ALREADY_EXISTS',
+        message: 'Another account already uses this email address.',
+      });
+    }
+    return this.findById(id);
+  }
 
   /** The five push toggles (Screen 36), as the app's own field names. */
   async notificationPreferences(id: string): Promise<NotificationPreferences> {

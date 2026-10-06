@@ -33,6 +33,11 @@ import { NotificationService } from '../../shared/services/notification.service'
 import { StorageKeys } from '../../shared/services/storage-keys.util';
 import { StorageService } from '../../shared/services/storage.service';
 import { resolveStoredImageUrl } from '../../shared/utils/cover-url.util';
+import {
+  consumeEmailedCode,
+  issueEmailedCode,
+} from '../../shared/utils/emailed-code.util';
+import { maskEmail } from '../../shared/utils/mask-email.util';
 import { isActiveFamilyMember } from '../../shared/utils/family-membership.util';
 import { sessionCutoff } from '../../shared/utils/session-cutoff.util';
 import { assertStorageQuota } from '../../shared/utils/storage-quota.util';
@@ -60,6 +65,7 @@ import type {
   SharedVaultMember,
   SharedVaultSession,
   SharedVaultSummary,
+  StartSharedVaultRecoveryInput,
   UnlockSharedVaultInput,
 } from './validations/shared-vault.schema';
 
@@ -410,14 +416,52 @@ export class SharedVaultsService {
     vaultId: string,
     input: RecoverSharedVaultInput,
   ): Promise<SharedVaultSession> {
-    const { member } = await this.requireActiveMember(userId, vaultId);
+    const { member, vault } = await this.requireActiveMember(userId, vaultId);
+    const user = await this.requireUser(userId);
+    await consumeEmailedCode(this.db, {
+      userId,
+      type: 'shared_vault_recovery',
+      scopeId: vaultId,
+      code: input.code,
+    });
+    await this.assertDistinctFromAccountPassword(userId, input.newPasscode);
+    await this.replacePasscode(member.id, input.newPasscode);
+    await this.notificationService.sendVaultPasscodeReset(user, vault.name);
+    return this.issueSession(userId, vaultId);
+  }
+
+  /** Step 1 of passcode recovery: account password here, emailed code in `recover`. */
+  async startRecovery(
+    userId: string,
+    vaultId: string,
+    input: StartSharedVaultRecoveryInput,
+  ): Promise<{ sentTo: string; expiresInMinutes: number }> {
+    const { vault } = await this.requireActiveMember(userId, vaultId);
     const user = await this.requireUser(userId);
     if (!(await argon2.verify(user.passwordHash, input.accountPassword))) {
       throw new UnauthorizedException('Incorrect account password');
     }
-    await this.assertDistinctFromAccountPassword(userId, input.newPasscode);
-    await this.replacePasscode(member.id, input.newPasscode);
-    return this.issueSession(userId, vaultId);
+    if (!user.email) {
+      throw new ConflictException({
+        code: 'EMAIL_REQUIRED',
+        message: 'Add an email address to your account to recover this vault.',
+      });
+    }
+    const code = await issueEmailedCode(this.db, {
+      userId,
+      type: 'shared_vault_recovery',
+      scopeId: vaultId,
+      ttlMinutes: env.VAULT_RECOVERY_CODE_TTL_MINUTES,
+    });
+    await this.notificationService.sendVaultRecoveryCode(
+      user.email,
+      code,
+      vault.name,
+    );
+    return {
+      sentTo: maskEmail(user.email),
+      expiresInMinutes: env.VAULT_RECOVERY_CODE_TTL_MINUTES,
+    };
   }
 
   // ------------------------------------------------------------ items

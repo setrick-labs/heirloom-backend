@@ -1,8 +1,10 @@
 import { env } from '../../config/env';
+import { renderEmail, safe, storeLinksText, strong } from './email-layout';
 
 export interface GiftEmailContent {
   subject: string;
   body: string;
+  html: string;
   /** Null when APP_LINK_BASE_URL isn't configured — the email still stands alone. */
   ctaUrl: string | null;
 }
@@ -39,9 +41,22 @@ export function buildGiftInviteEmail(input: {
     ctaUrl
       ? `See Your Gift: ${ctaUrl}`
       : `Sign up at Heirloom with ${input.recipientEmail} to open it.`,
+    ...storeLinksText(),
   ].join('\n');
 
-  return { subject, body, ctaUrl };
+  const html = renderEmail({
+    preheader: `${input.senderName} saved something for you on Heirloom.`,
+    eyebrow: 'A gift for you',
+    heading: subject,
+    paragraphs: [
+      safe`${strong(input.senderName)} saved ${strong(`“${input.journeyTitle}”`)} for you — photos and videos kept just for this day.`,
+      safe`Join Heirloom with ${strong(input.recipientEmail)} to open it. Signing up with this address is how we know the gift is yours.`,
+    ],
+    cta: ctaUrl ? { label: 'See your gift', url: ctaUrl } : undefined,
+    showStoreBadges: true,
+  });
+
+  return { subject, body, html, ctaUrl };
 }
 
 /** Section 4 — the recipient already has an account, so this points at the app, not a signup. */
@@ -62,5 +77,17 @@ export function buildGiftUnlockedEmail(input: {
     ctaUrl ? `Open Heirloom: ${ctaUrl}` : 'Open Heirloom to see it.',
   ].join('\n');
 
-  return { subject, body, ctaUrl };
+  const html = renderEmail({
+    preheader: `“${input.journeyTitle}” is ready to open.`,
+    eyebrow: 'Your gift has opened',
+    heading: subject,
+    paragraphs: [
+      safe`${strong(`“${input.journeyTitle}”`)} is ready to open. It's been waiting for today.`,
+    ],
+    cta: ctaUrl ? { label: 'Open your gift', url: ctaUrl } : undefined,
+    // They have an account, but may have switched phones since.
+    showStoreBadges: true,
+  });
+
+  return { subject, body, html, ctaUrl };
 }

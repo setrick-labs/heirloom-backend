@@ -1,4 +1,12 @@
-import { pgTable, uuid, text, timestamp, index } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  text,
+  timestamp,
+  index,
+  integer,
+  varchar,
+} from 'drizzle-orm/pg-core';
 
 import { authTokenTypeEnum } from './enums';
 import { users } from './users';
@@ -18,6 +26,15 @@ export const authTokens = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     type: authTokenTypeEnum('type').notNull(),
     tokenHash: text('token_hash').notNull(),
+    // Wrong guesses against this code. Per-IP throttling alone lets a
+    // distributed guesser walk a 6-digit space; at AUTH_CODE_MAX_ATTEMPTS
+    // the code is burned (usedAt set) and a new one must be requested.
+    attempts: integer('attempts').notNull().default(0),
+    // What the code is scoped to beyond the user — the shared vault id for
+    // `shared_vault_recovery`. Null for account-wide codes.
+    scopeId: uuid('scope_id'),
+    // The address being confirmed, for `email_change` only.
+    email: varchar('email', { length: 255 }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     usedAt: timestamp('used_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })

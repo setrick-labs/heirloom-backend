@@ -119,6 +119,23 @@ export function buildFamilyJoinPush(input: {
   };
 }
 
+/**
+ * An emailed family invite to someone who already has the app. Lands on the
+ * same screen the email's link does; `inviteId` (not the token) is enough
+ * there, because accepting by id is only allowed for the invited address.
+ */
+export function buildFamilyInvitePush(input: {
+  inviterName: string;
+  familyName: string;
+  inviteId: string;
+}): PushContent {
+  return {
+    title: 'Family invitation',
+    body: `${input.inviterName} invited you to join ${input.familyName}.`,
+    link: { path: '/family-invite', params: { inviteId: input.inviteId } },
+  };
+}
+
 /** Section 4's reveal, as a push rather than an email — the recipient has the app. */
 export function buildGiftUnlockedPush(input: {
   senderName: string;

@@ -34,6 +34,8 @@ import {
   recoverSharedVaultInputSchema,
   type RenameSharedVaultInput,
   renameSharedVaultInputSchema,
+  type StartSharedVaultRecoveryInput,
+  startSharedVaultRecoveryInputSchema,
   type RequestSharedVaultUploadUrlInput,
   requestSharedVaultUploadUrlInputSchema,
   type UnlockSharedVaultInput,
@@ -101,6 +103,21 @@ export class SharedVaultsController {
     @Body(new ZodValidationPipe(unlockSharedVaultInputSchema)) body: UnlockSharedVaultInput,
   ) {
     return apiResponse(await this.sharedVaults.unlock(user.id, id, body), 'Vault unlocked');
+  }
+
+  /** Step 1 of passcode recovery: account password, then a code by email. */
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @Post(':id/recover/start')
+  async startRecovery(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', VaultId()) id: string,
+    @Body(new ZodValidationPipe(startSharedVaultRecoveryInputSchema))
+    body: StartSharedVaultRecoveryInput,
+  ) {
+    return apiResponse(
+      await this.sharedVaults.startRecovery(user.id, id, body),
+      'Recovery code sent',
+    );
   }
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
